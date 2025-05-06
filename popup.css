@@ -1,0 +1,65 @@
+/* popup.css */
+
+.popup-container {
+    width: 300px; /* Adjust width as needed */
+    padding: 10px;
+    font-family: sans-serif; /* Example font */
+  }
+  
+  .popup-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #eee; /* Separator line */
+    margin-bottom: 15px;
+  }
+  
+  .header-icon {
+    cursor: pointer;
+    font-size: 20px; /* Adjust size */
+  }
+  
+  .header-title {
+    font-size: 18px;
+    font-weight: bold;
+  }
+  
+  .popup-body {
+    display: flex;
+    flex-direction: column;
+    gap: 15px; /* Space between control groups */
+  }
+  
+  .control-group {
+    display: flex;
+    flex-direction: column;
+  }
+  
+  .control-group label {
+    margin-bottom: 5px;
+    font-size: 14px;
+    font-weight: bold;
+  }
+  
+  /* Basic styling for input elements - customize further */
+  input[type="checkbox"] {
+    /* Basic checkbox styling */
+    margin-top: 5px;
+  }
+  
+  input[type="range"] {
+     width: 100%;
+     margin-top: 5px;
+  }
+  
+  select {
+    width: 100%;
+    padding: 8px;
+    margin-top: 5px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+  }
+  
+  /* You can add more specific styling to match your Figma design */
+  /* For example, styling the toggle switch to look more like the Figma image */
