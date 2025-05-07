@@ -11,6 +11,8 @@ function Popup() {
   // State for the selected difficulty
   const [difficulty, setDifficulty] = useState('Normal');
 
+  // YUANYOU manual editing --> under development stage
+  const [manualSelect, setManualSelect] = useState(false); // State for manual selection
   // Placeholder functions for navigation (linking to settings)
   const goToSettings = () => {
     // In a real Plasmo extension, you'd open the options page like this:
@@ -48,6 +50,24 @@ function Popup() {
     // This value would be crucial for the AI prompt engineering to get
     // text rewritten to the appropriate level.
   };
+
+  // button for development testing
+  const handleManualSelect = () => {
+    setManualSelect(!manualSelect);
+    console.log('Manual selection mode:', manualSelect ? 'Off' : 'On');
+    // This would toggle the manual selection mode in your content script
+    // and could be used to highlight or select text for rewriting.
+  };
+
+  const handleDevelopmentQuickTest = () => {
+    // This function would be used for quick testing of the extension's functionality credit: Cheng
+     // 向 content 脚本发送消息，触发翻译
+     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs[0].id) {
+        chrome.tabs.sendMessage(tabs[0].id, { type: "TRANSLATE_TEXT" })
+        console.log("原文：", tabs[0].id)
+      }
+    })}
 
   return (
     <div className="popup-container">
