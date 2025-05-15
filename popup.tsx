@@ -1,64 +1,95 @@
 import React, { useState } from 'react';
-import './popup.css'; // We'll create a basic CSS file for styling
+import './popup.css'; // 创建一个基础的 CSS 文件用于样式
 
 function Popup() {
-  // State for the On/Off toggle
+  // On/Off 开关的状态
   const [isOn, setIsOn] = useState(true);
 
-  // State for the "No. of Sentences Rewritten" slider
-  const [sentencesToRewrite, setSentencesToRewrite] = useState(5); // Default value
+  // “重写句子数量”滑块的状态
+  const [sentencesToRewrite, setSentencesToRewrite] = useState(5); // 默认值
 
-  // State for the selected difficulty
+  // 难度选择状态
   const [difficulty, setDifficulty] = useState('Normal');
 
-  // Placeholder functions for navigation (linking to settings)
+  // YUANYOU 手动选择 --> 开发中阶段
+  const [manualSelect, setManualSelect] = useState(false); // 手动选择模式的状态
+
+  // 跳转到设置页的占位函数
   const goToSettings = () => {
-    // In a real Plasmo extension, you'd open the options page like this:
+    // 在真实 Plasmo 扩展中，可以这样打开选项页：
     chrome.runtime.openOptionsPage();
-    // For this prototype, we'll just log a message
+    // 现在作为原型阶段，仅打印提示信息
     console.log('Navigate to settings page');
   };
 
-  // Handler for the toggle switch
+  // 开关切换处理函数
   const handleToggle = () => {
     setIsOn(!isOn);
     console.log('Plugin is now:', !isOn ? 'On' : 'Off');
-    // Here you would send a message to the content script or background script
-    // to actually enable/disable the plugin's functionality on the active tab.
-    // Example (requires setting up message passing):
-    // chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-    //   if (tabs[0]?.id) {
-    //     chrome.tabs.sendMessage(tabs[0].id, { action: 'togglePlugin', enabled: !isOn });
-    //   }
-    // });
+  
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs[0]?.id) {
+        chrome.tabs.sendMessage(tabs[0].id, {
+          type: "TOGGLE_PLUGIN",
+          enabled: !isOn
+        });
+      }
+    });
   };
 
-  // Handler for the slider
   const handleSliderChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    setSentencesToRewrite(Number(event.target.value));
-    console.log('Sentences to rewrite:', event.target.value);
-    // You would likely use this value to inform the content script/AI
-    // about the desired level of rewriting, possibly in conjunction with difficulty.
+    const value = Number(event.target.value);
+    setSentencesToRewrite(value);
+    console.log('Sentences to rewrite:', value);
+  
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs[0]?.id) {
+        chrome.tabs.sendMessage(tabs[0].id, {
+          type: "SET_REWRITE_COUNT",
+          count: value
+        });
+      }
+    });
   };
 
-  // Handler for the difficulty dropdown
+  // 难度选择变更处理函数
   const handleDifficultyChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
-    setDifficulty(event.target.value);
-    console.log('Selected difficulty:', event.target.value);
-    // This value would be crucial for the AI prompt engineering to get
-    // text rewritten to the appropriate level.
+    const value = event.target.value;
+    setDifficulty(value);
+    console.log('Selected difficulty:', value);
+  
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs[0]?.id) {
+        chrome.tabs.sendMessage(tabs[0].id, {
+          type: "SET_DIFFICULTY",
+          difficulty: value
+        });
+      }
+    });
   };
+  
+
+  // 开发调试用的快速测试按钮
+  const handleDevelopmentQuickTest = () => {
+    // 用于快速测试插件功能 credit: Cheng
+    // 向 content 脚本发送消息触发翻译操作
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs[0].id) {
+        chrome.tabs.sendMessage(tabs[0].id, { type: "TRANSLATE_TEXT" })
+        console.log("原文：", tabs[0].id)
+      }
+    })}
 
   return (
     <div className="popup-container">
       <header className="popup-header">
         <div className="header-icon" onClick={goToSettings}>
-          {/* Placeholder for menu icon */}
+          {/* 菜单图标占位符 */}
           ☰
         </div>
         <div className="header-title">Genshred</div>
         <div className="header-icon" onClick={goToSettings}>
-          {/* Placeholder for user icon */}
+          {/* 用户图标占位符 */}
           👤
         </div>
       </header>
@@ -66,48 +97,48 @@ function Popup() {
       <section className="popup-body">
         <div className="control-group">
           <label htmlFor="on-off-toggle">On/ Off</label>
-          {/* Basic toggle switch - can be styled further with CSS */}
+          {/* 基础开关组件 - 可用 CSS 进一步美化 */}
           <input
             type="checkbox"
             id="on-off-toggle"
             checked={isOn}
             onChange={handleToggle}
-            // A more visually appealing toggle would typically use CSS and labels
+            // 更美观的开关通常使用 CSS 和 label 实现
           />
         </div>
 
-        {/* Slider for "No. of Sentences Rewritten" */}
+        {/* “重写句子数量”滑块 */}
         <div className="control-group">
           <label htmlFor="sentences-slider">No. of Sentences Rewritten</label>
           <input
             type="range"
             id="sentences-slider"
-            min="1" // Example min value
-            max="10" // Example max value - adjust as needed
+            min="1" // 最小值示例
+            max="10" // 最大值示例 - 可根据需要调整
             value={sentencesToRewrite}
             onChange={handleSliderChange}
           />
-          {/* Optional: Display the current slider value */}
+          {/* 可选：显示当前滑块值 */}
           <span>{sentencesToRewrite}</span>
         </div>
 
-        {/* Difficulty Selection */}
+        {/* 难度选择 */}
         <div className="control-group">
           <label htmlFor="difficulty-select">Choose Difficulty</label>
-          {/* Using a standard select dropdown for simplicity in prototype */}
+          {/* 使用标准下拉框组件，适合原型阶段 */}
           <select id="difficulty-select" value={difficulty} onChange={handleDifficultyChange}>
             <option value="Easy">Easy</option>
             <option value="Normal">Normal</option>
             <option value="Hard">Hard</option>
             <option value="Custom_1">Custom_1</option>
-            {/* "Add Custom..." would likely be a button or link that opens settings */}
-            {/* For now, it's just an option indicating where to go for custom settings */}
-             <option value="Add Custom...">Add Custom...</option> {/* This option wouldn't typically be selectable */}
+            {/* “添加自定义...” 通常是按钮或链接打开设置 */}
+            {/* 这里是一个提示性选项 */}
+            <option value="Add Custom...">Add Custom...</option> {/* 该选项通常不会被选择 */}
           </select>
-          {/* The search and clear icons from Figma would require more complex component implementation */}
+          {/* 从 Figma 获取的搜索和清除图标需要更复杂的组件实现 */}
         </div>
 
-        {/* You can add more control groups for future features here */}
+        {/* 可在此添加未来新功能的控件分组 */}
 
       </section>
     </div>
