@@ -69,7 +69,7 @@ function Popup() {
   };
   
 
-  // 开发调试用的快速测试按钮
+  /*// 开发调试用的快速测试按钮
   const handleDevelopmentQuickTest = () => {
     // 用于快速测试插件功能 credit: Cheng
     // 向 content 脚本发送消息触发翻译操作
@@ -78,7 +78,7 @@ function Popup() {
         chrome.tabs.sendMessage(tabs[0].id, { type: "TRANSLATE_TEXT" })
         console.log("原文：", tabs[0].id)
       }
-    })}
+    })}*/
 
   return (
     <div className="popup-container">

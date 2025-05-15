@@ -8,9 +8,11 @@ function processText() {
   const paragraphs = Array.from(document.querySelectorAll("p"))
   const textContents = paragraphs.map((p) => p.innerText).filter(Boolean)
 
-  const allSentences = textContents.flatMap((text) =>
-    text.match(/[^.!?]+[.!?]+/g) || []
-  ).filter((s) => s.trim().length > 10)
+  const allSentences = textContents
+    .flatMap((text) =>
+      text.match(/[^.!?]+[.!?]+/g) || []
+    )
+    .filter((s) => s.trim().length > 10)
 
   const selectedSentences = allSentences
     .sort(() => Math.random() - 0.5)
@@ -24,13 +26,20 @@ function processText() {
         level: difficultyLevel
       },
       (response) => {
+        console.log("收到后台响应：", response)
         const adjusted = response?.adjustedText
         if (adjusted) {
+          console.log("原文:", sentence)
+          console.log("替换后:", adjusted)
           replaceSentenceInDOM(sentence, adjusted)
+        } else {
+          console.log("后台返回的 adjustedText 为空或未定义")
         }
       }
     )
   })
+
+  
 }
 
 // 替换句子的函数（添加 data-original）

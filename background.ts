@@ -13,7 +13,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     const options = {
       method: 'POST',
       headers: {
-        Authorization: 'Bearer sk-xxx', // 替换为你自己的 key
+        Authorization: 'Bearer sk-panaghczpcpdhwnmmslvelnvzfjhudrcxlkqjoihvfibsqqi', // 替换为你自己的 key
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
@@ -64,7 +64,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     const options = {
       method: 'POST',
       headers: {
-        Authorization: 'Bearer sk-xxx', // 替换为你自己的 key
+        Authorization: 'Bearer sk-panaghczpcpdhwnmmslvelnvzfjhudrcxlkqjoihvfibsqqi', // 替换为你自己的 key
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
