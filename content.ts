@@ -92,7 +92,6 @@ chrome.runtime.onMessage.addListener((message, _sender, _sendResponse) => {
     sentenceCount = message.count
     console.log("句子数量：", sentenceCount)
     if (isEnabled) {
-      restoreOriginalText()
       processText()
     }
   }
@@ -101,7 +100,6 @@ chrome.runtime.onMessage.addListener((message, _sender, _sendResponse) => {
     difficultyLevel = message.difficulty
     console.log("难度：", difficultyLevel)
     if (isEnabled) {
-      restoreOriginalText()
       processText()
     }
   }
