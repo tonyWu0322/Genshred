@@ -1,4 +1,30 @@
-chrome.runtime.onMessage.addListener(
+// This script will now act as a proxy to forward messages to the backend server
+
+// Function to generate or retrieve a unique user ID
+async function getUserId(): Promise<string> {
+  // Use chrome.storage.local to store the user ID persistently
+  console.log("Retrieving user ID from storage...");
+  const storageKey = 'genShredUserId';
+  const storedId = await chrome.storage.local.get(storageKey);
+
+  if (storedId[storageKey]) {
+    console.log("User ID found in storage:", storedId[storageKey]);
+    return storedId[storageKey];
+  } else {
+    // Generate a simple UUID (you might need a library for a proper UUID)
+    // For Plasmo, you might use a package like 'uuid'
+    // As a simple placeholder:
+    
+    const newId = 'user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    console.log("No user ID found, generating a new one:", newId);
+    await chrome.storage.local.set({ [storageKey]: newId });
+
+    console.log("Generated new user ID:", newId);
+    return newId;
+  }
+}
+
+/*chrome.runtime.onMessage.addListener(
   async (message, sender, sendResponse) => {
     if (message.type === "ADJUST_TEXT") {
       const { payload, level } = message
@@ -11,7 +37,7 @@ chrome.runtime.onMessage.addListener(
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: "Bearer sk-panaghczpcpdhwnmmslvelnvzfjhudrcxlkqjoihvfibsqqi" 
+            Authorization: "Bearer XXX" 
           },
           body: JSON.stringify({
             model: "Qwen2.5-7B-Instruct",
@@ -37,4 +63,112 @@ chrome.runtime.onMessage.addListener(
       return true // 表示异步响应
     }
   }
-)
+)*/
+
+chrome.runtime.onMessage.addListener(
+  async (message, sender, sendResponse) => {
+    // NEW: Handle message to process text block by sending to backend
+    if (message.type === "PROCESS_TEXT_BLOCK") {
+      const { textBlock, numSentences, difficultyLevel, customPrompt } = message;
+      console.log("Received text block for processing:", { textBlock: textBlock.substring(0, 100) + "...", numSentences, difficultyLevel, customPrompt });
+      const userId = await getUserId(); // Get the user ID
+
+      try {
+        const backendUrl = "http://localhost:5000/process_text"; // <--- REPLACE WITH YOUR BACKEND URL
+        console.log("Sending text block to backend:", { userId, numSentences, difficultyLevel, customPrompt, textBlock: textBlock.substring(0, 100) + "..." }); // Log start of text
+
+        const response = await fetch(backendUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            // No need for LLM API key here, backend has it
+          },
+          body: JSON.stringify({
+            userId: userId,
+            text: textBlock, // Send the entire text block
+            numSentences: numSentences, // Send sentence count config
+            userLevel: difficultyLevel, // Send difficulty as userLevel
+            customPrompt: customPrompt // Send custom prompt
+          })
+        });
+
+        if (!response.ok) {
+            // Handle HTTP errors
+            const errorText = await response.text();
+            console.error(`Backend HTTP error! Status: ${response.status}`, errorText);
+            // Send an error response back to the content script
+             sendResponse({ error: `Backend error: ${response.status} - ${errorText}` });
+             return true; // Indicate async response
+        }
+
+        const data = await response.json();
+
+        // Backend is expected to return { "rewritten_sentences": [{ original_index: ..., rewritten_text: ... }] }
+        console.log("Received backend response:", data);
+
+        // Forward the backend's response (which should contain rewritten sentences and indices)
+        sendResponse(data);
+
+      } catch (err) {
+        console.error("Error calling backend /process_text:", err);
+        // Send an error response back to the content script
+        sendResponse({ error: `Frontend fetch error: ${err.message}` });
+      }
+
+      return true; // Indicate async response
+    }
+
+    // NEW: Handle message to track arbitrary events
+     if (message.type === "TRACK_EVENT") {
+        const { eventType, eventData } = message;
+        const userId = await getUserId(); // Get the user ID
+
+        try {
+             const backendUrl = "YOUR_BACKEND_SERVER_URL/track_event"; // <--- REPLACE WITH YOUR BACKEND URL
+             console.log("Sending track event to backend:", { userId, eventType, eventData });
+
+             const response = await fetch(backendUrl, {
+                method: "POST",
+                headers: {
+                   "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                   userId: userId,
+                   eventType: eventType,
+                   eventData: eventData // Send arbitrary event data
+                })
+             });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error(`Backend HTTP error for track event! Status: ${response.status}`, errorText);
+            } else {
+                console.log("Track event sent successfully.");
+            }
+
+        } catch (err) {
+             console.error("Error calling backend /track_event:", err);
+        }
+
+         // Tracking doesn't need to wait for a response from the background script
+         // sendResponse({}); // Optional: send empty response if needed by sender
+         return false; // Indicate no async response needed for tracking
+     }
+
+
+    // OLD: Remove or repurpose the direct LLM API call handler
+    // This logic is now handled by the backend's /process_text endpoint
+    if (message.type === "ADJUST_TEXT") {
+        console.warn("ADJUST_TEXT message type is deprecated. Use PROCESS_TEXT_BLOCK instead.");
+        // Optionally send a dummy response or error back
+        sendResponse({ error: "ADJUST_TEXT message type deprecated." });
+        return false; // No async response needed
+    }
+
+    // Keep other message listeners if you have them...
+    // ... (your other message listeners if any) ...
+
+    // If no message type matches, return false
+    return false;
+  }
+);
