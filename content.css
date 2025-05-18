@@ -1,0 +1,54 @@
+/* popup.css or content.css */
+
+/* Style for the rewritten sentences */
+.genshred-rewritten {
+    background-color: #e6f3ff; /* Lighter blue background */
+    padding: 2px 4px;
+    border-radius: 3px;
+    position: relative;
+    cursor: help;
+    transition: background-color 0.2s ease;
+}
+
+/* Hover effect for rewritten text */
+.genshred-rewritten:hover {
+    background-color: #cce7ff;
+}
+
+/* Tooltip style for original text */
+.genshred-original-tooltip {
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    background-color: #333;
+    color: white;
+    padding: 8px 12px;
+    border-radius: 4px;
+    font-size: 14px;
+    z-index: 1000;
+    max-width: 300px;
+    white-space: normal;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.2s ease, visibility 0.2s ease;
+}
+
+/* Show tooltip on hover */
+.genshred-rewritten:hover .genshred-original-tooltip {
+    opacity: 1;
+    visibility: visible;
+}
+
+/* Add arrow to tooltip */
+.genshred-original-tooltip::before {
+    content: '';
+    position: absolute;
+    top: -6px;
+    left: 50%;
+    transform: translateX(-50%);
+    border-width: 0 6px 6px 6px;
+    border-style: solid;
+    border-color: transparent transparent #333 transparent;
+}
