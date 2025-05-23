@@ -69,54 +69,50 @@ chrome.runtime.onMessage.addListener(
   async (message, sender, sendResponse) => {
     // NEW: Handle message to process text block by sending to backend
     if (message.type === "PROCESS_TEXT_BLOCK") {
-      const { textBlock, numSentences, difficultyLevel, customPrompt } = message;
-      console.log("Received text block for processing:", { textBlock: textBlock.substring(0, 100) + "...", numSentences, difficultyLevel, customPrompt });
-      const userId = await getUserId(); // Get the user ID
+      // NEW: Destructure promptInstruction and customPromptTemplate
+      const { textBlock, numSentences, userLevel, promptInstruction, customPromptTemplate } = message;
+      console.log("Received text block for processing:", { textBlock: textBlock.substring(0, 100) + "...", numSentences, userLevel, promptInstruction, customPromptTemplate });
+      const userId = await getUserId();
 
       try {
         const backendUrl = "http://localhost:5000/process_text"; // <--- REPLACE WITH YOUR BACKEND URL
-        console.log("Sending text block to backend:", { userId, numSentences, difficultyLevel, customPrompt, textBlock: textBlock.substring(0, 100) + "..." }); // Log start of text
+        console.log("Sending text block to backend:", { userId, numSentences, userLevel, promptInstruction, customPromptTemplate, textBlock: textBlock.substring(0, 100) + "..." });
 
         const response = await fetch(backendUrl, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            // No need for LLM API key here, backend has it
           },
           body: JSON.stringify({
             userId: userId,
-            text: textBlock, // Send the entire text block
-            numSentences: numSentences, // Send sentence count config
-            userLevel: difficultyLevel, // Send difficulty as userLevel
-            customPrompt: customPrompt // Send custom prompt
+            text: textBlock,
+            numSentences: numSentences,
+            userLevel: userLevel, // This is the 'Easy'/'Normal'/'Hard' string
+            // NEW: Pass the explicit prompt instruction and custom template
+            promptInstruction: promptInstruction,
+            customPromptTemplate: customPromptTemplate
           })
         });
 
         if (!response.ok) {
-            // Handle HTTP errors
             const errorText = await response.text();
             console.error(`Backend HTTP error! Status: ${response.status}`, errorText);
-            // Send an error response back to the content script
-             sendResponse({ error: `Backend error: ${response.status} - ${errorText}` });
-             return true; // Indicate async response
+            sendResponse({ error: `Backend error: ${response.status} - ${errorText}` });
+            return true;
         }
 
         const data = await response.json();
-
-        // Backend is expected to return { "rewritten_sentences": [{ original_index: ..., rewritten_text: ... }] }
         console.log("Received backend response:", data);
-
-        // Forward the backend's response (which should contain rewritten sentences and indices)
         sendResponse(data);
 
       } catch (err) {
         console.error("Error calling backend /process_text:", err);
-        // Send an error response back to the content script
         sendResponse({ error: `Frontend fetch error: ${err.message}` });
       }
 
-      return true; // Indicate async response
+      return true;
     }
+
 
     // NEW: Handle message to track arbitrary events
      if (message.type === "TRACK_EVENT") {

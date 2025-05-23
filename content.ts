@@ -16,23 +16,33 @@ const STORAGE_KEYS = {
     CUSTOM_PROMPT: 'genShredCustomPromptTemplate' // Assuming you'll add this later
 };
 
-// Define default values (should match popup.tsx)
+// NEW: Use the consistent default for CUSTOM_PROMPT
+const CUSTOM_PROMPT_DEFAULT = "Rewrite the following sentence(s) for a user with language level {user_level}. Simplify vocabulary and sentence structure if necessary, while retaining the original meaning:\n\n{sentences_to_rewrite}";
 const DEFAULT_SETTINGS = {
   [STORAGE_KEYS.IS_ON]: true,
   [STORAGE_KEYS.SENTENCE_COUNT]: 5,
   [STORAGE_KEYS.DIFFICULTY_LEVEL]: 'Normal',
-  [STORAGE_KEYS.CUSTOM_PROMPT]: "Rewrite the following sentence(s) for a user with language level {user_level}. Simplify vocabulary and sentence structure if necessary, while retaining the original meaning:\n\n{sentences_to_rewrite}" // Default prompt
+  [STORAGE_KEYS.CUSTOM_PROMPT]: CUSTOM_PROMPT_DEFAULT // Use the consistent default
 };
 
-
 // Variables to hold current settings state in content script
-let currentSettings = { ...DEFAULT_SETTINGS }; // Initialize with defaults
+let currentSettings = { ...DEFAULT_SETTINGS };
+// NEW: Store the loaded difficulty mappings
+let currentDifficultyMappings: { [key: string]: string } = {
+    "Easy": "Simplify vocabulary and sentence structure for a beginner (A2 CEFR level).",
+    "Normal": "Rewrite for an intermediate English speaker (B2 CEFR level). Use clear and concise language.",
+    "Hard": "Rewrite for an advanced English speaker (C1 CEFR level). Use sophisticated vocabulary while maintaining clarity.",
+    "Custom_1": "Rewrite for a user with specific needs, as defined by the custom prompt below."
+};
 
 
 // NEW: Function to load settings from storage
 async function loadSettings() {
     console.log("Content script loading settings...");
-    const storedSettings = await chrome.storage.local.get(Object.values(STORAGE_KEYS)); // Get all defined keys
+    const storedSettings = await chrome.storage.local.get([
+        ...Object.values(STORAGE_KEYS),
+        'genShredDifficultyMapping' // Load the new mapping key
+    ]);
 
     // Update currentSettings with loaded values, falling back to defaults
     currentSettings = {
@@ -41,19 +51,23 @@ async function loadSettings() {
         [STORAGE_KEYS.DIFFICULTY_LEVEL]: storedSettings[STORAGE_KEYS.DIFFICULTY_LEVEL] ?? DEFAULT_SETTINGS[STORAGE_KEYS.DIFFICULTY_LEVEL],
         [STORAGE_KEYS.CUSTOM_PROMPT]: storedSettings[STORAGE_KEYS.CUSTOM_PROMPT] ?? DEFAULT_SETTINGS[STORAGE_KEYS.CUSTOM_PROMPT],
     };
+
+    // Update difficulty mappings
+    currentDifficultyMappings = storedSettings['genShredDifficultyMapping'] ?? currentDifficultyMappings;
+
     console.log("Settings loaded:", currentSettings);
+    console.log("Difficulty mappings loaded:", currentDifficultyMappings);
 
     // --- Initial Action based on loaded state ---
-    // If plugin was enabled when the page loaded, process text immediately
     if (currentSettings[STORAGE_KEYS.IS_ON]) {
-        // Restore first in case of previous run on this page
-        restoreOriginalText(); // Clean up any previous modifications
-        processParagraphs(); // Start processing
+        restoreOriginalText();
+        processParagraphs();
     }
 }
 
 // NEW: Listen for storage changes. This allows background/popup to change settings
 // and the content script reacts without needing explicit messages or page reload.
+// Note for the future: add 'genShredDifficultyMapping' 
 chrome.storage.onChanged.addListener((changes, namespace) => {
     if (namespace === 'local') {
         console.log('Storage change detected:', changes);
@@ -119,107 +133,112 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
 
 // --- Function to process paragraphs and send to backend ---
 async function processParagraphs() {
-  if (!currentSettings[STORAGE_KEYS.IS_ON]) return;
+    if (!currentSettings[STORAGE_KEYS.IS_ON]) return;
 
-  const paragraphs = Array.from(document.querySelectorAll("p"));
-  let lastProcessingTime = 0;
+    const paragraphs = Array.from(document.querySelectorAll("p"));
+    let lastProcessingTime = 0;
 
-  for (const p of paragraphs) {
-    const textBlock = p.innerText.trim();
-    
-    // Skip if too short
-    if (textBlock.length < MIN_PARAGRAPH_LENGTH) {
-      console.log("Skipping short paragraph:", textBlock.substring(0, 30) + "...");
-      continue;
-    }
+    for (const p of paragraphs) {
+        const textBlock = p.innerText.trim();
 
-    // Check cache first
-    const cacheKey = `${textBlock}_${currentSettings[STORAGE_KEYS.DIFFICULTY_LEVEL]}_${currentSettings[STORAGE_KEYS.SENTENCE_COUNT]}`;
-    if (PARAGRAPH_CACHE.has(cacheKey)) {
-      console.log("Using cached response for paragraph");
-      const cachedResponse = PARAGRAPH_CACHE.get(cacheKey);
-      applyRewritesToParagraph(p, cachedResponse.rewritten_sentences);
-      continue;
-    }
-
-    // Throttle API requests
-    const now = Date.now();
-    if (now - lastProcessingTime < PROCESSING_DELAY) {
-      await new Promise(resolve => setTimeout(resolve, PROCESSING_DELAY));
-    }
-    lastProcessingTime = now;
-
-    console.log("Processing paragraph:", textBlock.substring(0, 50) + "...");
-
-    // Send the entire paragraph block to the background script
-    // Background script will forward to the backend
-    chrome.runtime.sendMessage(
-      {
-        type: "PROCESS_TEXT_BLOCK", // Message type
-        textBlock: textBlock,
-        // Use current settings from state
-        numSentences: currentSettings[STORAGE_KEYS.SENTENCE_COUNT],
-        difficultyLevel: currentSettings[STORAGE_KEYS.DIFFICULTY_LEVEL],
-        customPrompt: currentSettings[STORAGE_KEYS.CUSTOM_PROMPT] // Use prompt from state
-      },
-      (response) => {
-        if (!response?.error && response?.rewritten_sentences) {
-          // Cache successful response
-          PARAGRAPH_CACHE.set(cacheKey, response);
-          applyRewritesToParagraph(p, response.rewritten_sentences);
-        }
-        console.log("Received response from background (backend):", response);
-
-        const rewrittenSentences = response?.rewritten_sentences;
-        const error = response?.error;
-
-        if (error) {
-            console.error("Backend processing failed:", error);
-             // NEW: Track processing error
-             chrome.runtime.sendMessage({
-                 type: "TRACK_EVENT",
-                 eventType: "paragraph_processed_error",
-                 eventData: {
-                    paragraphLength: textBlock.length,
-                    userLevel: currentSettings[STORAGE_KEYS.DIFFICULTY_LEVEL],
-                    error: error
-                 }
-            });
-            // Optionally show error to user
-            return;
+        if (textBlock.length < MIN_PARAGRAPH_LENGTH) {
+            console.log("Skipping short paragraph:", textBlock.substring(0, 30) + "...");
+            continue;
         }
 
-        if (rewrittenSentences && rewrittenSentences.length > 0) {
-          console.log("Applying rewrites to paragraph.");
-          // Call function to apply rewrites to this specific paragraph element
-          applyRewritesToParagraph(p, rewrittenSentences);
+        // NEW: Determine the actual prompt instruction and/or template to use for caching
+        const selectedDifficulty = currentSettings[STORAGE_KEYS.DIFFICULTY_LEVEL] as string;
+        let effectivePromptInstruction = currentDifficultyMappings[selectedDifficulty] || "";
+        let effectiveCustomPromptTemplate = currentSettings[STORAGE_KEYS.CUSTOM_PROMPT];
 
-           // Track successful processing event
-           chrome.runtime.sendMessage({
-              type: "TRACK_EVENT",
-              eventType: "paragraph_processed_success",
-              eventData: {
-                 paragraphLength: textBlock.length,
-                 numSentencesRewritten: rewrittenSentences.length,
-                 userLevel: currentSettings[STORAGE_KEYS.DIFFICULTY_LEVEL]
-              }
-           });
-
-        } else {
-          console.log("No rewritten sentences returned for this paragraph.");
-            // Track event even if no sentences were rewritten
-            chrome.runtime.sendMessage({
-              type: "TRACK_EVENT",
-              eventType: "paragraph_processed_no_rewrite",
-              eventData: {
-                 paragraphLength: textBlock.length,
-                 userLevel: currentSettings[STORAGE_KEYS.DIFFICULTY_LEVEL]
-              }
-           });
+        // If the selected difficulty is 'Custom_1', then the instruction is fixed, and the customPromptTemplate takes precedence
+        if (selectedDifficulty === "Custom_1") {
+            // In this case, `effectivePromptInstruction` is just a description, the real instruction is the template.
+            // So we'll pass the template as the "instruction" for the cache key, but keep the instruction for the backend.
+            effectivePromptInstruction = String(effectiveCustomPromptTemplate); // Use the actual template for cache key
         }
-      }
-    );
-  }
+        
+        const cacheKey = `${textBlock}_${effectivePromptInstruction}_${effectiveCustomPromptTemplate}_${currentSettings[STORAGE_KEYS.SENTENCE_COUNT]}`;
+
+        if (PARAGRAPH_CACHE.has(cacheKey)) {
+            console.log("Using cached response for paragraph");
+            const cachedResponse = PARAGRAPH_CACHE.get(cacheKey);
+            applyRewritesToParagraph(p, cachedResponse.rewritten_sentences);
+            continue;
+        }
+
+        const now = Date.now();
+        if (now - lastProcessingTime < PROCESSING_DELAY) {
+            await new Promise(resolve => setTimeout(resolve, PROCESSING_DELAY));
+        }
+        lastProcessingTime = now;
+
+        console.log("Processing paragraph:", textBlock.substring(0, 50) + "...");
+
+        // Send to backend
+        chrome.runtime.sendMessage(
+            {
+                type: "PROCESS_TEXT_BLOCK",
+                textBlock: textBlock,
+                numSentences: currentSettings[STORAGE_KEYS.SENTENCE_COUNT],
+                // NEW: Pass the actual prompt instruction and the custom prompt template
+                promptInstruction: effectivePromptInstruction, // This is the mapped instruction
+                customPromptTemplate: effectiveCustomPromptTemplate, // This is the full template
+                // We still send difficultyLevel for tracking and backend logic,
+                // but the prompt itself will be constructed based on promptInstruction/customPromptTemplate
+                userLevel: selectedDifficulty // Keeping `userLevel` name for backend's API
+            },
+            (response) => {
+                if (!response?.error && response?.rewritten_sentences) {
+                    PARAGRAPH_CACHE.set(cacheKey, response); // Cache with the new, more specific key
+                    applyRewritesToParagraph(p, response.rewritten_sentences);
+                }
+                console.log("Received response from background (backend):", response);
+
+                const rewrittenSentences = response?.rewritten_sentences;
+                const error = response?.error;
+
+                if (error) {
+                    console.error("Backend processing failed:", error);
+                    chrome.runtime.sendMessage({
+                        type: "TRACK_EVENT",
+                        eventType: "paragraph_processed_error",
+                        eventData: {
+                            paragraphLength: textBlock.length,
+                            userLevel: currentSettings[STORAGE_KEYS.DIFFICULTY_LEVEL],
+                            error: error
+                        }
+                    });
+                    return;
+                }
+
+                if (rewrittenSentences && rewrittenSentences.length > 0) {
+                    console.log("Applying rewrites to paragraph.");
+                    applyRewritesToParagraph(p, rewrittenSentences);
+
+                    chrome.runtime.sendMessage({
+                        type: "TRACK_EVENT",
+                        eventType: "paragraph_processed_success",
+                        eventData: {
+                            paragraphLength: textBlock.length,
+                            numSentencesRewritten: rewrittenSentences.length,
+                            userLevel: currentSettings[STORAGE_KEYS.DIFFICULTY_LEVEL]
+                        }
+                    });
+                } else {
+                    console.log("No rewritten sentences returned for this paragraph.");
+                    chrome.runtime.sendMessage({
+                        type: "TRACK_EVENT",
+                        eventType: "paragraph_processed_no_rewrite",
+                        eventData: {
+                            paragraphLength: textBlock.length,
+                            userLevel: currentSettings[STORAGE_KEYS.DIFFICULTY_LEVEL]
+                        }
+                    });
+                }
+            }
+        );
+    }
 }
 
 // NEW: Function to apply rewrites to a specific paragraph element
@@ -425,80 +444,102 @@ function restoreOriginalText() {
   });
 }
 
-
 // Listen for messages from the popup or background script
 chrome.runtime.onMessage.addListener((message, _sender, _sendResponse) => {
-  // NEW: Handle syncing all settings from popup on load
-  if (message.type === "SYNC_SETTINGS") {
-      console.log("Content script received SYNC_SETTINGS message.");
-      const settings = message.settings;
-      // Update currentSettings based on the message
-      // Note: This is less robust than listening to storage.onChanged,
-      // but useful for ensuring popup state syncs immediately on opening.
-      currentSettings = { ...currentSettings, ...settings };
-       console.log("Synced settings:", currentSettings);
+    // NEW: Handle syncing all settings from popup on load (update to also sync mappings)
+    if (message.type === "SYNC_SETTINGS") {
+        console.log("Content script received SYNC_SETTINGS message.");
+        const settings = message.settings;
+        currentSettings = { ...currentSettings, ...settings };
+        // Also update mappings if they were synced (though storage.onChanged is primary for this)
+        // This SYNC_SETTINGS might be expanded if you decide to send mappings from popup.
+        console.log("Synced settings:", currentSettings);
 
-       // Re-apply logic based on new synced settings
-       restoreOriginalText(); // Clean up before applying
-       if (currentSettings[STORAGE_KEYS.IS_ON]) {
-            processParagraphs(); // Start processing with synced settings
-       }
+        restoreOriginalText();
+        if (currentSettings[STORAGE_KEYS.IS_ON]) {
+            processParagraphs();
+        }
+        return false;
+    }
 
-       return false; // No async response needed
-  }
+    // ... (existing TOGGLE_PLUGIN, SET_REWRITE_COUNT, SET_DIFFICULTY) ...
+    // These will mostly be handled by storage.onChanged now.
 
-
-  // OLD Message handlers - these are now less critical as storage.onChanged
-  // is the primary trigger, but keep them for potential immediate reaction
-  // when popup is open and user interacts.
-
-  if (message.type === "TOGGLE_PLUGIN") {
-    // State update will happen via storage.onChanged listener now
-    // isEnabled = message.enabled; // Remove direct state update
-    console.log("Content script received TOGGLE_PLUGIN message. State update via storage.");
-    // Action will be triggered by storage.onChanged
-    // if (isEnabled) { processParagraphs(); } else { restoreOriginalText(); }
-    return false; // No async response needed
-  }
-
-  if (message.type === "SET_REWRITE_COUNT") {
-    // State update will happen via storage.onChanged listener
-    // sentenceCount = message.count; // Remove direct state update
-    console.log("Content script received SET_REWRITE_COUNT message. State update via storage.");
-     // Action will be triggered by storage.onChanged
-    // if (isEnabled) { restoreOriginalText(); processParagraphs(); }
-    return false; // No async response needed
-  }
-
-  if (message.type === "SET_DIFFICULTY") {
-    // State update will happen via storage.onChanged listener
-    // difficultyLevel = message.difficulty; // Remove direct state update
-    console.log("Content script received SET_DIFFICULTY message. State update via storage.");
-    // Action will be triggered by storage.onChanged
-    // if (isEnabled) { restoreOriginalText(); processParagraphs(); }
-    return false; // No async response needed
-  }
-
-   // NEW: Handle setting custom prompt from popup (if you add this feature)
-   if (message.type === "SET_CUSTOM_PROMPT") {
-       // State update will happen via storage.onChanged listener
-       // customPromptTemplate = message.prompt; // Remove direct state update
-       console.log("Content script received SET_CUSTOM_PROMPT message. State update via storage.");
-        // Action will be triggered by storage.onChanged
-        // if (isEnabled) { restoreOriginalText(); processParagraphs(); }
+    // NEW: Handle CLEAR_CACHE message (as discussed previously)
+    if (message.type === "CLEAR_CACHE") {
+        console.log("Content script received CLEAR_CACHE message. Clearing cache.");
+        PARAGRAPH_CACHE.clear(); // Clear the cache
+        restoreOriginalText(); // Revert any changes on the page
+        if (currentSettings[STORAGE_KEYS.IS_ON]) {
+            processParagraphs(); // Re-process the page with current settings
+        }
         return false; // No async response needed
-   }
+    }
 
-
-  // OLD: Remove or ignore the old ADJUST_TEXT message listener from background
-  // This is no longer needed as processing starts from content script
-  // if (message.type === "ADJUST_TEXT") { ... }
-
-
-  // If no message type matches, return false
-  return false;
+    return false;
 });
 
-// --- NEW: Load settings from storage when the content script is injected ---
-// This makes the content script initialize based on saved state, not just popup messages.
+// Update the storage change listener to also react to mapping changes
+chrome.storage.onChanged.addListener((changes, namespace) => {
+    if (namespace === 'local') {
+        console.log('Storage change detected:', changes);
+        let settingsChanged = false;
+
+        // Update currentSettings based on what changed
+        for (let key in changes) {
+            if (STORAGE_KEYS.hasOwnProperty(key)) {
+                currentSettings[key] = changes[key].newValue;
+                settingsChanged = true;
+            }
+            // NEW: Update mappings if they changed
+            if (key === 'genShredDifficultyMapping') {
+                currentDifficultyMappings = changes[key].newValue;
+                settingsChanged = true; // Trigger re-processing if mappings change
+            }
+        }
+
+        if (changes[STORAGE_KEYS.IS_ON] !== undefined && changes[STORAGE_KEYS.IS_ON].newValue !== undefined) {
+            const newIsOnState = changes[STORAGE_KEYS.IS_ON].newValue;
+            currentSettings[STORAGE_KEYS.IS_ON] = newIsOnState;
+
+            console.log(`Plugin state changed via storage: ${newIsOnState}`);
+
+            if (newIsOnState) {
+                restoreOriginalText();
+                processParagraphs();
+            } else {
+                restoreOriginalText();
+            }
+            return;
+        }
+
+        let otherSettingsChanged = false;
+        for (let key in changes) {
+            if ((STORAGE_KEYS.hasOwnProperty(key) && key !== STORAGE_KEYS.IS_ON) || key === 'genShredDifficultyMapping') {
+                if (changes[key].newValue !== undefined) {
+                    if (key === 'genShredDifficultyMapping') {
+                        currentDifficultyMappings = changes[key].newValue;
+                    } else {
+                        currentSettings[key] = changes[key].newValue;
+                    }
+                    otherSettingsChanged = true;
+                    console.log(`Setting "${key}" changed via storage.`);
+                }
+            }
+        }
+
+        if (otherSettingsChanged && currentSettings[STORAGE_KEYS.IS_ON]) {
+            console.log("Other settings changed and plugin is ON. Re-processing.");
+            // Clear cache if custom prompt or difficulty mapping changed to force new LLM call
+            if (changes[STORAGE_KEYS.CUSTOM_PROMPT] || changes['genShredDifficultyMapping'] || changes[STORAGE_KEYS.DIFFICULTY_LEVEL] ) {
+                PARAGRAPH_CACHE.clear();
+                console.log("Cache cleared due to prompt/difficulty mapping change.");
+            }
+            restoreOriginalText();
+            processParagraphs();
+        }
+    }
+});
+
+
 loadSettings();

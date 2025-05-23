@@ -3,21 +3,21 @@ import React, { useState, useEffect } from 'react'; // Import useEffect
 import './popup.css'; // 创建一个基础的 CSS 文件用于样式
 
 // Define keys for storage
-const STORAGE_KEYS = {
+export const STORAGE_KEYS = {
   IS_ON: 'genShredPluginState',
   SENTENCE_COUNT: 'genShredSentenceCount',
   DIFFICULTY_LEVEL: 'genShredDifficultyLevel',
   CUSTOM_PROMPT: 'genShredCustomPromptTemplate' // Assuming you'll add this later
 };
-
 // Define default values
-const DEFAULT_SETTINGS = {
+const CUSTOM_PROMPT_DEFAULT = "Rewrite the following sentence(s) for a user with language level {user_level}. Simplify vocabulary and sentence structure if necessary, while retaining the original meaning:\n\n{sentences_to_rewrite}";
+
+export const DEFAULT_SETTINGS = {
   [STORAGE_KEYS.IS_ON]: true,
   [STORAGE_KEYS.SENTENCE_COUNT]: 5,
-  [STORAGE_KEYS.DIFFICULTY_LEVEL]: 'Normal', // Map to backend's userLevel, e.g., 'Normal' -> intermediate
-  // [STORAGE_KEYS.CUSTOM_PROMPT]: "Rewrite the following sentence(s) for a user with language level {user_level}. Simplify vocabulary and sentence structure if necessary, while retaining the original meaning:\n\n{sentences_to_rewrite}" // Default prompt
+  [STORAGE_KEYS.DIFFICULTY_LEVEL]: 'Normal',
+  [STORAGE_KEYS.CUSTOM_PROMPT]: CUSTOM_PROMPT_DEFAULT // Now consistently defined
 };
-
 
 function Popup() {
   // On/Off 开关的状态 - 初始化时不会立即有实际值，先给默认值
