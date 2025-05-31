@@ -1,3 +1,31 @@
+## Todo List
+
+### 前端
+- 网页处理逻辑优化，适配更多场景
+    - DOM 优化（Immersive Translation deepwiki）
+    - 更便捷的prompt优化
+    - 针对长网页的懒加载
+- 端口选择与切换
+    - 目前是写死的 localhost
+- 本地缓存功能实装
+    - clear cache 按钮目前未实装 
+- AI 对话窗口
+    - 可加载的课程包或与课程网页互动的 AI
+- 用户系统
+    - 注册页面等
+
+### 后端
+- 数据库结构优化
+    - 数据脱敏
+- 报错处理，rebouncing(?)
+- 访问频次、次数上限
+- 更好的用户系统
+
+
+
+
+
+
 This is a [Plasmo extension](https://docs.plasmo.com/) project bootstrapped with [`plasmo init`](https://www.npmjs.com/package/plasmo).
 
 ## Getting Started
