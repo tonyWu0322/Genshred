@@ -1,3 +1,61 @@
+## 简介
+Genshred 是一款大语言模型驱动的分级阅读互联网插件，用于辅助用户阅读外语网页或提高外语阅读能力。
+
+
+## 快速开始
+
+在使用 Genshred 前，需要先启动后端服务器 Parabasis ([项目地址]())
+
+### 1. 启动后端服务器
+
+```bash
+# 创建并激活Python虚拟环境
+python -m venv ENV_DIR
+source ENV_DIR/bin/activate  # Linux/Mac
+# 或
+ENV_DIR\Scripts\activate  # Windows
+
+# 安装依赖
+pip install -r requirements.txt
+
+# 启动服务器
+python parabasis.py
+```
+注意配置API Key:
+
+**Linux/macOS (Bash/Zsh)**:
+````bash
+export LLM_API_KEY='your-siliconflow-api-key-here'
+````
+
+**Windows (Command Prompt)**:
+````batch
+set LLM_API_KEY=your-siliconflow-api-key-here
+````
+
+**Windows (PowerShell)**:
+````powershell
+$env:LLM_API_KEY='your-siliconflow-api-key-here'
+````
+
+### 2. 启动前端开发环境
+
+```bash
+# 安装依赖并启动开发服务器
+pnpm install
+pnpm dev
+```
+
+### 3. 加载浏览器插件
+
+1. 打开 Chrome/Edge 浏览器
+2. 进入扩展程序页面 (chrome://extensions 或 edge://extensions)
+3. 开启"开发者模式"
+4. 点击"加载已解压的扩展程序"
+5. 选择 `build/chrome-mv3-dev` 文件夹
+
+完成以上步骤后，即可在浏览器工具栏看到 Genshred 图标。
+
 ## Todo List
 
 ### 前端
@@ -21,6 +79,9 @@
 - 访问频次、次数上限
 - 更好的用户系统
 
+### 未来发展
+- 多语言支持（多语言处理逻辑，设置项，Spacy 模型）
+- 自定义 LLM 接口
 
 
 
