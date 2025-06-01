@@ -60,9 +60,10 @@ pnpm dev
 
 ### 前端
 - 网页处理逻辑优化，适配更多场景
-    - DOM 优化（Immersive Translation deepwiki）
-    - 更便捷的prompt优化
-    - 针对长网页的懒加载
+    - DOM 优化（Immersive Translation deepwiki）√
+    - 更便捷的prompt优化√
+    - 自定义提示词准确度优化
+    - 针对长网页的懒加载（待改进）
 - 端口选择与切换
     - 目前是写死的 localhost
 - 本地缓存功能实装
