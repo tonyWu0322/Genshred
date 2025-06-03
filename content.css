@@ -8,17 +8,22 @@
     position: relative;
     cursor: help;
     transition: background-color 0.2s ease;
+    /* Default z-index */
+    z-index: 1;
 }
 
 /* Hover effect for rewritten text */
 .genshred-rewritten:hover {
     background-color: #cce7ff;
+    /* Ensure this element has higher z-index when hovered */
+    z-index: 1002;
 }
 
-/* Tooltip style for original text */
-.genshred-original-tooltip {
-    position: absolute;
-    top: 100%;
+/* Create a single global tooltip container that all elements will use */
+.genshred-tooltip-container {
+    display: none;
+    position: fixed;
+    bottom: 10px;
     left: 50%;
     transform: translateX(-50%);
     background-color: #333;
@@ -26,29 +31,20 @@
     padding: 8px 12px;
     border-radius: 4px;
     font-size: 14px;
-    z-index: 1000;
-    max-width: 300px;
+    z-index: 10000; /* Ensure it's always on top */
+    max-width: 80%;
     white-space: normal;
     box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-    opacity: 0;
-    visibility: hidden;
-    transition: opacity 0.2s ease, visibility 0.2s ease;
+    pointer-events: none;
+    opacity: 0.95;
+    transition: opacity 0.2s ease;
+    text-align: left;
+    line-height: 1.4;
+    word-break: break-word;
 }
 
-/* Show tooltip on hover */
-.genshred-rewritten:hover .genshred-original-tooltip {
-    opacity: 1;
-    visibility: visible;
-}
-
-/* Add arrow to tooltip */
-.genshred-original-tooltip::before {
-    content: '';
-    position: absolute;
-    top: -6px;
-    left: 50%;
-    transform: translateX(-50%);
-    border-width: 0 6px 6px 6px;
-    border-style: solid;
-    border-color: transparent transparent #333 transparent;
+/* Hide the default tooltip behavior */
+.genshred-rewritten::after,
+.genshred-rewritten::before {
+    display: none !important;
 }

@@ -24,6 +24,28 @@ async function getUserId(): Promise<string> {
   }
 }
 
+// Function to get the prompt for a specific difficulty level
+async function getPromptForDifficulty(difficultyLevel: string): Promise<string> {
+  const mappingStorageKey = 'genShredDifficultyMapping';
+  const storedMapping = await chrome.storage.local.get(mappingStorageKey);
+  
+  if (storedMapping[mappingStorageKey] && storedMapping[mappingStorageKey][difficultyLevel]) {
+    console.log(`Using stored prompt for ${difficultyLevel}:`, storedMapping[mappingStorageKey][difficultyLevel]);
+    return storedMapping[mappingStorageKey][difficultyLevel];
+  } else {
+    // Default mappings if not found in storage
+    const defaultMapping: Record<string, string> = {
+      "Easy": "Simplify vocabulary and sentence structure for a beginner (A2 CEFR level).",
+      "Normal": "Rewrite for an intermediate English speaker (B2 CEFR level). Use clear and concise language.",
+      "Hard": "Rewrite for an advanced English speaker (C1 CEFR level). Use sophisticated vocabulary while maintaining clarity.",
+      "Custom_1": "Rewrite for a user with specific needs, as defined by the custom prompt below."
+    };
+    
+    console.log(`No stored prompt found for ${difficultyLevel}, using default:`, defaultMapping[difficultyLevel]);
+    return defaultMapping[difficultyLevel] || defaultMapping["Normal"];
+  }
+}
+
 /*chrome.runtime.onMessage.addListener(
   async (message, sender, sendResponse) => {
     if (message.type === "ADJUST_TEXT") {
@@ -73,10 +95,13 @@ chrome.runtime.onMessage.addListener(
       const { textBlock, numSentences, userLevel, promptInstruction, customPromptTemplate } = message;
       console.log("Received text block for processing:", { textBlock: textBlock.substring(0, 100) + "...", numSentences, userLevel, promptInstruction, customPromptTemplate });
       const userId = await getUserId();
+      
+      // Get the prompt for the selected difficulty level
+      const difficultyPrompt = await getPromptForDifficulty(userLevel);
 
       try {
         const backendUrl = "http://localhost:5000/process_text"; // <--- REPLACE WITH YOUR BACKEND URL
-        console.log("Sending text block to backend:", { userId, numSentences, userLevel, promptInstruction, customPromptTemplate, textBlock: textBlock.substring(0, 100) + "..." });
+        console.log("Sending text block to backend:", { userId, numSentences, userLevel, promptInstruction: difficultyPrompt, customPromptTemplate, textBlock: textBlock.substring(0, 100) + "..." });
 
         const response = await fetch(backendUrl, {
           method: "POST",
@@ -88,8 +113,8 @@ chrome.runtime.onMessage.addListener(
             text: textBlock,
             numSentences: numSentences,
             userLevel: userLevel, // This is the 'Easy'/'Normal'/'Hard' string
-            // NEW: Pass the explicit prompt instruction and custom template
-            promptInstruction: promptInstruction,
+            // NEW: Pass the explicit prompt instruction from the difficulty mapping
+            promptInstruction: difficultyPrompt,
             customPromptTemplate: customPromptTemplate
           })
         });

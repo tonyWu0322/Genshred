@@ -1,29 +1,41 @@
 // popup.tsx
 import React, { useState, useEffect } from 'react'; // Import useEffect
 import './popup.css'; // 创建一个基础的 CSS 文件用于样式
+import PromptSettingsModal from './PromptSettingsModal'; // Import the modal component
+import UserModal from './UserModal'; // Import the user modal component
 
 // Define keys for storage
 export const STORAGE_KEYS = {
   IS_ON: 'genShredPluginState',
   SENTENCE_COUNT: 'genShredSentenceCount',
   DIFFICULTY_LEVEL: 'genShredDifficultyLevel',
-  CUSTOM_PROMPT: 'genShredCustomPromptTemplate' // Assuming you'll add this later
+  CUSTOM_PROMPT: 'genShredCustomPromptTemplate', // Assuming you'll add this later
+  DIFFICULTY_MAPPING: 'genShredDifficultyMapping' // Added for storing prompt mappings
 };
 // Define default values
 const CUSTOM_PROMPT_DEFAULT = "Rewrite the following sentence(s) for a user with language level {user_level}. Simplify vocabulary and sentence structure if necessary, while retaining the original meaning:\n\n{sentences_to_rewrite}";
+
+// Define the difficulty mapping type
+type DifficultyMapping = Record<string, string>;
 
 export const DEFAULT_SETTINGS = {
   [STORAGE_KEYS.IS_ON]: true,
   [STORAGE_KEYS.SENTENCE_COUNT]: 5,
   [STORAGE_KEYS.DIFFICULTY_LEVEL]: 'Normal',
-  [STORAGE_KEYS.CUSTOM_PROMPT]: CUSTOM_PROMPT_DEFAULT // Now consistently defined
+  [STORAGE_KEYS.CUSTOM_PROMPT]: CUSTOM_PROMPT_DEFAULT, // Now consistently defined
+  [STORAGE_KEYS.DIFFICULTY_MAPPING]: {
+    "Easy": "Simplify vocabulary and sentence structure for a beginner (A2 CEFR level).",
+    "Normal": "Rewrite for an intermediate English speaker (B2 CEFR level). Use clear and concise language.",
+    "Hard": "Rewrite for an advanced English speaker (C1 CEFR level). Use sophisticated vocabulary while maintaining clarity.",
+    "Custom_1": "Rewrite for a user with specific needs, as defined by the custom prompt below."
+  } as DifficultyMapping
 };
 
 function Popup() {
   // On/Off 开关的状态 - 初始化时不会立即有实际值，先给默认值
   const [isOn, setIsOn] = useState(DEFAULT_SETTINGS[STORAGE_KEYS.IS_ON]);
 
-  // “重写句子数量”滑块的状态 - 初始化时不会立即有实际值，先给默认值
+  // "重写句子数量"滑块的状态 - 初始化时不会立即有实际值，先给默认值
   const [sentencesToRewrite, setSentencesToRewrite] = useState(DEFAULT_SETTINGS[STORAGE_KEYS.SENTENCE_COUNT]);
 
   // 难度选择状态 - 初始化时不会立即有实际值，先给默认值
@@ -31,6 +43,16 @@ function Popup() {
 
   // YUANYOU 手动选择 --> 开发中阶段 (Assuming this state doesn't need persistence in storage for now)
   const [manualSelect, setManualSelect] = useState(false);
+  
+  // State for prompt settings modal
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  
+  // State for user modal
+  const [isUserModalOpen, setIsUserModalOpen] = useState(false);
+  
+  // State to track if user is logged in
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [currentUser, setCurrentUser] = useState('');
 
   // --- NEW: Load settings from storage when the popup mounts ---
   useEffect(() => {
@@ -40,6 +62,7 @@ function Popup() {
         STORAGE_KEYS.IS_ON,
         STORAGE_KEYS.SENTENCE_COUNT,
         STORAGE_KEYS.DIFFICULTY_LEVEL,
+        STORAGE_KEYS.DIFFICULTY_MAPPING
         // STORAGE_KEYS.CUSTOM_PROMPT // Load prompt if stored
       ]);
 
@@ -47,6 +70,14 @@ function Popup() {
       setIsOn(storedSettings[STORAGE_KEYS.IS_ON] ?? DEFAULT_SETTINGS[STORAGE_KEYS.IS_ON]);
       setSentencesToRewrite(storedSettings[STORAGE_KEYS.SENTENCE_COUNT] ?? DEFAULT_SETTINGS[STORAGE_KEYS.SENTENCE_COUNT]);
       setDifficulty(String(storedSettings[STORAGE_KEYS.DIFFICULTY_LEVEL] ?? DEFAULT_SETTINGS[STORAGE_KEYS.DIFFICULTY_LEVEL]));
+      
+      // Initialize difficulty mapping if not set
+      if (!storedSettings[STORAGE_KEYS.DIFFICULTY_MAPPING]) {
+        await chrome.storage.local.set({ 
+          [STORAGE_KEYS.DIFFICULTY_MAPPING]: DEFAULT_SETTINGS[STORAGE_KEYS.DIFFICULTY_MAPPING] 
+        });
+      }
+      
       // setCustomPrompt(storedSettings[STORAGE_KEYS.CUSTOM_PROMPT] ?? DEFAULT_SETTINGS[STORAGE_KEYS.CUSTOM_PROMPT]); // Load prompt
 
       // Optional: Send initial state to content script on load if plugin was already enabled
@@ -73,11 +104,27 @@ function Popup() {
     loadSettings();
   }, []); // Empty dependency array means this effect runs only once after the initial render
 
+  // Add a new useEffect to check user login status
+  useEffect(() => {
+    const checkLoginStatus = async () => {
+      const storedUser = await chrome.storage.local.get(['currentUser']);
+      if (storedUser.currentUser) {
+        setIsLoggedIn(true);
+        setCurrentUser(storedUser.currentUser);
+      }
+    };
+    
+    checkLoginStatus();
+  }, []);
 
-  // 跳转到设置页的占位函数
+  // Function to open settings modal
   const goToSettings = () => {
-    chrome.runtime.openOptionsPage();
-    console.log('Navigate to settings page');
+    setIsModalOpen(true);
+  };
+  
+  // Function to open user modal
+  const openUserModal = () => {
+    setIsUserModalOpen(true);
   };
 
   // 开关切换处理函数
@@ -125,12 +172,8 @@ function Popup() {
 
     // Handle the "Add Custom..." option separately
     if (value === "Add Custom...") {
-      goToSettings(); // Open options page to add custom difficulty/prompt
-      // Optionally reset the select value or keep it as "Normal"
-       // setDifficulty(DEFAULT_SETTINGS[STORAGE_KEYS.DIFFICULTY_LEVEL]); // Resetting might be confusing
-       // Let the user click "Add Custom..." and handle the change on the settings page.
-       // If you don't want "Add Custom..." to be selectable, you can disable it or handle it differently.
-       return; // Don't change state or save if "Add Custom..." is selected
+      goToSettings(); // Open prompt settings modal
+      return; // Don't change state or save if "Add Custom..." is selected
     }
 
     setDifficulty(value);
@@ -165,13 +208,21 @@ const handleClearCache = async () => {
     <div className="popup-container">
       <header className="popup-header">
         <div className="header-icon" onClick={goToSettings}>
-          {/* 菜单图标占位符 */}
-          ☰
+          {/* 设置图标 */}
+          ⚙️
         </div>
         <div className="header-title">Genshred</div>
-        <div className="header-icon" onClick={goToSettings}>
-          {/* 用户图标占位符 */}
-          👤
+        <div className="header-icon" onClick={openUserModal}>
+          {/* 用户图标，根据登录状态显示不同样式 */}
+          {isLoggedIn ? (
+            <div className="user-logged-in" title={`Logged in as ${currentUser}`}>
+              👤
+            </div>
+          ) : (
+            <div className="user-logged-out" title="Login or Register">
+              👤
+            </div>
+          )}
         </div>
       </header>
 
@@ -187,7 +238,7 @@ const handleClearCache = async () => {
           />
         </div>
 
-        {/* “重写句子数量”滑块 */}
+        {/* "重写句子数量"滑块 */}
         <div className="control-group">
           <label htmlFor="sentences-slider">No. of Sentences Rewritten</label>
           <input
@@ -199,7 +250,7 @@ const handleClearCache = async () => {
             onChange={handleSliderChange} // Use handler
           />
           {/* 可选：显示当前滑块值 */}
-          <span>{sentencesToRewrite}</span> {/* Use state */}
+          <span>{Number(sentencesToRewrite)}</span> {/* Use state */}
         </div>
 
         {/* 难度选择 */}
@@ -210,11 +261,9 @@ const handleClearCache = async () => {
             <option value="Easy">Easy</option>
             <option value="Normal">Normal</option>
             <option value="Hard">Hard</option>
-            {/* Assuming Custom_1 corresponds to a specific prompt/level mapping */}
+            {/* 将Custom_1移到最后 */}
+            <option value="Add Custom...">Add Custom...</option>
             <option value="Custom_1">Custom_1</option>
-            {/* “添加自定义...” 通常是按钮或链接打开设置 */}
-            {/* 这里是一个提示性选项 */}
-            <option value="Add Custom...">Add Custom...</option> {/* 该选项通常不会被选择，用于提示 */}
           </select>
           {/* 从 Figma 获取的搜索和清除图标需要更复杂的组件实现 */}
         </div>
@@ -230,6 +279,18 @@ const handleClearCache = async () => {
                 Clear Cache
             </button>
         </div>
+        
+        {/* User Modal */}
+        <UserModal 
+          isOpen={isUserModalOpen} 
+          onClose={() => setIsUserModalOpen(false)} 
+        />
+        
+        {/* Prompt Settings Modal */}
+        <PromptSettingsModal 
+          isOpen={isModalOpen} 
+          onClose={() => setIsModalOpen(false)} 
+        />
     </div>
   );
 }
