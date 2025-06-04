@@ -4,11 +4,111 @@ const PROCESSING_DELAY = 1000; // 1 second delay between processing requests
 const PARAGRAPH_CACHE = new Map<string, any>(); // Cache for processed paragraphs
 const MIN_PARAGRAPH_LENGTH = 100; // Minimum characters to process
 const MAX_PARAGRAPH_LENGTH = 5000; // Maximum characters to process
-// NEW: Import storage API
-// In Plasmo, you can often access chrome APIs directly.
-// For better type safety, you might need @types/chrome
-
+// lazyloading
+let intersectionObserver: IntersectionObserver | null = null;
+const observedElements = new WeakSet<Element>();
 // Define keys for storage (should match popup.tsx)
+
+async function processElement(element: HTMLElement) {
+    try {
+        if (!currentSettings[STORAGE_KEYS.IS_ON] || 
+            element.classList.contains('genshred-processed') || 
+            element.classList.contains('genshred-processing') ||
+            element.closest('.genshred-rewritten')) {
+            console.log("Skipping element - already processed or processing");
+            return;
+        }
+
+        const textBlock = element.innerText.trim();
+        console.log("Processing text block:", textBlock.substring(0, 50) + "...");
+
+        if (textBlock.length < MIN_PARAGRAPH_LENGTH) {
+            console.log("Text block too short, skipping");
+            return;
+        }
+
+        // Mark as processing to prevent duplicate processing
+        element.classList.add('genshred-processing');
+
+        const selectedDifficulty = currentSettings[STORAGE_KEYS.DIFFICULTY_LEVEL] as string;
+        const effectivePromptInstruction = currentDifficultyMappings[selectedDifficulty] || "";
+        const effectiveCustomPromptTemplate = currentSettings[STORAGE_KEYS.CUSTOM_PROMPT];
+        
+        console.log("Using difficulty:", selectedDifficulty);
+        console.log("Using prompt instruction:", effectivePromptInstruction);
+
+        const cacheKey = `${textBlock}_${effectivePromptInstruction}_${effectiveCustomPromptTemplate}_${currentSettings[STORAGE_KEYS.SENTENCE_COUNT]}`;
+
+        if (PARAGRAPH_CACHE.has(cacheKey)) {
+            console.log("Using cached response");
+            const cachedResponse = PARAGRAPH_CACHE.get(cacheKey);
+            await applyRewritesToElement(element, cachedResponse.rewritten_sentences);
+            element.classList.add('genshred-processed');
+            element.classList.remove('genshred-processing');
+            return;
+        }
+
+        // Process text in chunks
+        const sentences = splitTextIntoSentences(textBlock);
+        console.log(`Split text into ${sentences.length} sentences`);
+        
+        const chunkSize = Math.min(Number(currentSettings[STORAGE_KEYS.SENTENCE_COUNT]), 3);
+        
+        for (let i = 0; i < sentences.length; i += chunkSize) {
+            const chunk = sentences.slice(i, i + chunkSize);
+            const chunkText = chunk.join(' ');
+            
+            console.log(`Processing chunk ${i/chunkSize + 1}:`, chunkText.substring(0, 50) + "...");
+
+            // Send message and wait for response
+            await new Promise((resolve, reject) => {
+                chrome.runtime.sendMessage(
+                    {
+                        type: "PROCESS_TEXT_BLOCK",
+                        textBlock: chunkText,
+                        numSentences: chunk.length,
+                        promptInstruction: effectivePromptInstruction,
+                        customPromptTemplate: effectiveCustomPromptTemplate,
+                        userLevel: selectedDifficulty,
+                        originalIndexOffset: i
+                    },
+                    (response) => {
+                        if (chrome.runtime.lastError) {
+                            console.error("Runtime error:", chrome.runtime.lastError);
+                            reject(chrome.runtime.lastError);
+                            return;
+                        }
+
+                        if (!response?.error && response?.rewritten_sentences) {
+                            const adjustedRewrites = response.rewritten_sentences.map(rw => ({
+                                ...rw,
+                                original_index: rw.original_index + i
+                            }));
+                            
+                            applyRewritesToElement(element, adjustedRewrites);
+                            const chunkKey = `${chunkText}_${effectivePromptInstruction}_${effectiveCustomPromptTemplate}_${chunk.length}`;
+                            PARAGRAPH_CACHE.set(chunkKey, { rewritten_sentences: adjustedRewrites });
+                        }
+                        resolve(response);
+                    }
+                );
+            });
+
+            // Add delay between chunks
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+
+        element.classList.add('genshred-processed');
+        element.classList.remove('genshred-processing');
+        
+    } catch (error) {
+        console.error("Error in processElement:", error);
+        element.classList.remove('genshred-processing');
+        throw error;
+    }
+}
+
+
 const STORAGE_KEYS = {
     IS_ON: 'genShredPluginState',
     SENTENCE_COUNT: 'genShredSentenceCount',
@@ -281,6 +381,16 @@ function initialize() {
     
     // 处理iframe内容
     handleIframes();
+
+    // Clean up observers when page is unloaded
+    window.addEventListener('unload', () => {
+        if (intersectionObserver) {
+            intersectionObserver.disconnect();
+        }
+        if (mutationObserver) {
+            mutationObserver.disconnect();
+        }
+    });
 }
 
 // 处理iframe内容
@@ -327,133 +437,215 @@ function handleIframes() {
 // 启动初始化
 initialize();
 
+// 我是懒加载 lazy loading
+function isElementInViewport(el: HTMLElement, buffer: number = 300): boolean {
+    const rect = el.getBoundingClientRect();
+    const windowHeight = window.innerHeight || document.documentElement.clientHeight;
+    const windowWidth = window.innerWidth || document.documentElement.clientWidth;
+    
+    return (
+        rect.top >= (0 - buffer) &&
+        rect.left >= 0 &&
+        rect.bottom <= (windowHeight + buffer) &&
+        rect.right <= windowWidth
+    );
+}
+
+function setupIntersectionObserver() {
+    if (intersectionObserver) {
+        intersectionObserver.disconnect();
+    }
+
+    intersectionObserver = new IntersectionObserver(
+        (entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting && currentSettings[STORAGE_KEYS.IS_ON]) {
+                    const element = entry.target;
+                    if (!element.classList.contains('genshred-processed')) {
+                        processElement(element as HTMLElement);
+                    }
+                    // Stop observing after processing
+                    intersectionObserver?.unobserve(element);
+                }
+            });
+        },
+        {
+            rootMargin: '300px 0px', // Start loading 300px before element enters viewport
+            threshold: 0.1
+        }
+    );
+}
+
 // --- Function to process paragraphs and send to backend ---
-async function processParagraphs() {
-    if (!currentSettings[STORAGE_KEYS.IS_ON]) return;
+// async function processParagraphs() {
+//     if (!currentSettings[STORAGE_KEYS.IS_ON]) return;
 
-    // 增加对更多元素类型的支持，不仅仅是段落
-    const textElements = Array.from(document.querySelectorAll("p, div, span, h1, h2, h3, h4, h5, h6, li, td, th"));
-    let lastProcessingTime = 0;
+//     // 增加对更多元素类型的支持，不仅仅是段落
+//     const textElements = Array.from(document.querySelectorAll("p, div, span, h1, h2, h3, h4, h5, h6, li, td, th"));
+//     let lastProcessingTime = 0;
 
-    for (const element of textElements) {
-        // 跳过已经处理过的元素或不可见元素
-        if (element.classList.contains('genshred-processed') || 
-            element.closest('.genshred-rewritten') || 
-            !isElementVisible(element)) {
-            continue;
-        }
+//     for (const element of textElements) {
+//         // 跳过已经处理过的元素或不可见元素
+//         if (element.classList.contains('genshred-processed') || 
+//             element.closest('.genshred-rewritten') || 
+//             !isElementVisible(element)) {
+//             continue;
+//         }
 
-        // 获取元素文本，处理不同类型的元素
-        let textBlock = "";
-        if (element instanceof HTMLElement) {
-            textBlock = element.innerText.trim();
-        } else {
-            textBlock = (element.textContent || "").trim();
-        }
+//         // 获取元素文本，处理不同类型的元素
+//         let textBlock = "";
+//         if (element instanceof HTMLElement) {
+//             textBlock = element.innerText.trim();
+//         } else {
+//             textBlock = (element.textContent || "").trim();
+//         }
 
-        if (textBlock.length < MIN_PARAGRAPH_LENGTH) {
-            // console.log("Skipping short paragraph:", textBlock.substring(0, 30) + "...");
-            continue;
-        }
+//         if (textBlock.length < MIN_PARAGRAPH_LENGTH) {
+//             // console.log("Skipping short paragraph:", textBlock.substring(0, 30) + "...");
+//             continue;
+//         }
 
-        // NEW: Determine the actual prompt instruction and/or template to use for caching
-        const selectedDifficulty = currentSettings[STORAGE_KEYS.DIFFICULTY_LEVEL] as string;
-        let effectivePromptInstruction = currentDifficultyMappings[selectedDifficulty] || "";
-        let effectiveCustomPromptTemplate = currentSettings[STORAGE_KEYS.CUSTOM_PROMPT];
+//         // NEW: Determine the actual prompt instruction and/or template to use for caching
+//         const selectedDifficulty = currentSettings[STORAGE_KEYS.DIFFICULTY_LEVEL] as string;
+//         let effectivePromptInstruction = currentDifficultyMappings[selectedDifficulty] || "";
+//         let effectiveCustomPromptTemplate = currentSettings[STORAGE_KEYS.CUSTOM_PROMPT];
 
-        // If the selected difficulty is 'Custom_1', then the instruction is fixed, and the customPromptTemplate takes precedence
-        if (selectedDifficulty === "Custom_1") {
-            // In this case, `effectivePromptInstruction` is just a description, the real instruction is the template.
-            // So we'll pass the template as the "instruction" for the cache key, but keep the instruction for the backend.
-            effectivePromptInstruction = String(effectiveCustomPromptTemplate); // Use the actual template for cache key
-        }
+//         // If the selected difficulty is 'Custom_1', then the instruction is fixed, and the customPromptTemplate takes precedence
+//         if (selectedDifficulty === "Custom_1") {
+//             // In this case, `effectivePromptInstruction` is just a description, the real instruction is the template.
+//             // So we'll pass the template as the "instruction" for the cache key, but keep the instruction for the backend.
+//             effectivePromptInstruction = String(effectiveCustomPromptTemplate); // Use the actual template for cache key
+//         }
         
-        const cacheKey = `${textBlock}_${effectivePromptInstruction}_${effectiveCustomPromptTemplate}_${currentSettings[STORAGE_KEYS.SENTENCE_COUNT]}`;
+//         const cacheKey = `${textBlock}_${effectivePromptInstruction}_${effectiveCustomPromptTemplate}_${currentSettings[STORAGE_KEYS.SENTENCE_COUNT]}`;
 
-        if (PARAGRAPH_CACHE.has(cacheKey)) {
-            console.log("Using cached response for paragraph");
-            const cachedResponse = PARAGRAPH_CACHE.get(cacheKey);
-            applyRewritesToElement(element, cachedResponse.rewritten_sentences);
+//         if (PARAGRAPH_CACHE.has(cacheKey)) {
+//             console.log("Using cached response for paragraph");
+//             const cachedResponse = PARAGRAPH_CACHE.get(cacheKey);
+//             applyRewritesToElement(element, cachedResponse.rewritten_sentences);
             
-            // 标记元素已处理
-            element.classList.add('genshred-processed');
-            continue;
-        }
+//             // 标记元素已处理
+//             element.classList.add('genshred-processed');
+//             continue;
+//         }
 
-        const now = Date.now();
-        if (now - lastProcessingTime < PROCESSING_DELAY) {
-            await new Promise(resolve => setTimeout(resolve, PROCESSING_DELAY));
-        }
-        lastProcessingTime = now;
+//         const now = Date.now();
+//         if (now - lastProcessingTime < PROCESSING_DELAY) {
+//             await new Promise(resolve => setTimeout(resolve, PROCESSING_DELAY));
+//         }
+//         lastProcessingTime = now;
 
-        console.log("Processing element:", textBlock.substring(0, 50) + "...");
+//         console.log("Processing element:", textBlock.substring(0, 50) + "...");
 
-        // Send to backend
-        chrome.runtime.sendMessage(
-            {
-                type: "PROCESS_TEXT_BLOCK",
-                textBlock: textBlock,
-                numSentences: currentSettings[STORAGE_KEYS.SENTENCE_COUNT],
-                // NEW: Pass the actual prompt instruction and the custom prompt template
-                promptInstruction: effectivePromptInstruction, // This is the mapped instruction
-                customPromptTemplate: effectiveCustomPromptTemplate, // This is the full template
-                // We still send difficultyLevel for tracking and backend logic,
-                // but the prompt itself will be constructed based on promptInstruction/customPromptTemplate
-                userLevel: selectedDifficulty // Keeping `userLevel` name for backend's API
-            },
-            (response) => {
-                if (!response?.error && response?.rewritten_sentences) {
-                    PARAGRAPH_CACHE.set(cacheKey, response); // Cache with the new, more specific key
-                    applyRewritesToElement(element, response.rewritten_sentences);
+//         // Send to backend
+//         chrome.runtime.sendMessage(
+//             {
+//                 type: "PROCESS_TEXT_BLOCK",
+//                 textBlock: textBlock,
+//                 numSentences: currentSettings[STORAGE_KEYS.SENTENCE_COUNT],
+//                 // NEW: Pass the actual prompt instruction and the custom prompt template
+//                 promptInstruction: effectivePromptInstruction, // This is the mapped instruction
+//                 customPromptTemplate: effectiveCustomPromptTemplate, // This is the full template
+//                 // We still send difficultyLevel for tracking and backend logic,
+//                 // but the prompt itself will be constructed based on promptInstruction/customPromptTemplate
+//                 userLevel: selectedDifficulty // Keeping `userLevel` name for backend's API
+//             },
+//             (response) => {
+//                 if (!response?.error && response?.rewritten_sentences) {
+//                     PARAGRAPH_CACHE.set(cacheKey, response); // Cache with the new, more specific key
+//                     applyRewritesToElement(element, response.rewritten_sentences);
                     
-                    // 标记元素已处理
-                    element.classList.add('genshred-processed');
-                }
-                console.log("Received response from background (backend):", response);
+//                     // 标记元素已处理
+//                     element.classList.add('genshred-processed');
+//                 }
+//                 console.log("Received response from background (backend):", response);
 
-                const rewrittenSentences = response?.rewritten_sentences;
-                const error = response?.error;
+//                 const rewrittenSentences = response?.rewritten_sentences;
+//                 const error = response?.error;
 
-                if (error) {
-                    console.error("Backend processing failed:", error);
-                    chrome.runtime.sendMessage({
-                        type: "TRACK_EVENT",
-                        eventType: "paragraph_processed_error",
-                        eventData: {
-                            paragraphLength: textBlock.length,
-                            userLevel: currentSettings[STORAGE_KEYS.DIFFICULTY_LEVEL],
-                            error: error
-                        }
-                    });
-                    return;
-                }
+//                 if (error) {
+//                     console.error("Backend processing failed:", error);
+//                     chrome.runtime.sendMessage({
+//                         type: "TRACK_EVENT",
+//                         eventType: "paragraph_processed_error",
+//                         eventData: {
+//                             paragraphLength: textBlock.length,
+//                             userLevel: currentSettings[STORAGE_KEYS.DIFFICULTY_LEVEL],
+//                             error: error
+//                         }
+//                     });
+//                     return;
+//                 }
 
-                if (rewrittenSentences && rewrittenSentences.length > 0) {
-                    console.log("Applying rewrites to element.");
+//                 if (rewrittenSentences && rewrittenSentences.length > 0) {
+//                     console.log("Applying rewrites to element.");
 
-                    chrome.runtime.sendMessage({
-                        type: "TRACK_EVENT",
-                        eventType: "paragraph_processed_success",
-                        eventData: {
-                            paragraphLength: textBlock.length,
-                            numSentencesRewritten: rewrittenSentences.length,
-                            userLevel: currentSettings[STORAGE_KEYS.DIFFICULTY_LEVEL]
-                        }
-                    });
-                } else {
-                    console.log("No rewritten sentences returned for this element.");
-                    chrome.runtime.sendMessage({
-                        type: "TRACK_EVENT",
-                        eventType: "paragraph_processed_no_rewrite",
-                        eventData: {
-                            paragraphLength: textBlock.length,
-                            userLevel: currentSettings[STORAGE_KEYS.DIFFICULTY_LEVEL]
-                        }
-                    });
+//                     chrome.runtime.sendMessage({
+//                         type: "TRACK_EVENT",
+//                         eventType: "paragraph_processed_success",
+//                         eventData: {
+//                             paragraphLength: textBlock.length,
+//                             numSentencesRewritten: rewrittenSentences.length,
+//                             userLevel: currentSettings[STORAGE_KEYS.DIFFICULTY_LEVEL]
+//                         }
+//                     });
+//                 } else {
+//                     console.log("No rewritten sentences returned for this element.");
+//                     chrome.runtime.sendMessage({
+//                         type: "TRACK_EVENT",
+//                         eventType: "paragraph_processed_no_rewrite",
+//                         eventData: {
+//                             paragraphLength: textBlock.length,
+//                             userLevel: currentSettings[STORAGE_KEYS.DIFFICULTY_LEVEL]
+//                         }
+//                     });
+//                 }
+//             }
+//         );
+//     }
+// }
+async function processParagraphs() {
+    if (!currentSettings[STORAGE_KEYS.IS_ON]) {
+        console.log("Plugin is turned of");
+        return;
+    }
+    console.log("Processing paragraphs...");
+    // Set up intersection observer
+    setupIntersectionObserver();
+    
+    // Select all potential text elements
+    const textElements = Array.from(document.querySelectorAll("p, div, span, h1, h2, h3, h4, h5, h6, li, td, th"));
+    console.log(`Found ${textElements.length} potential elements to process`);
+
+    let processedCount = 0;
+       // Process each visible element immediately and independently
+    for (const element of textElements) {
+        if (element instanceof HTMLElement && 
+            !observedElements.has(element) && 
+            isElementVisible(element)) {
+            
+            console.log("Processing element:", element.textContent?.substring(0, 50) + "...");
+            
+            // Add to observed set
+            observedElements.add(element);
+
+            // Start observing the element
+            intersectionObserver?.observe(element);
+
+            // If element is in viewport, process it immediately
+            if (isElementInViewport(element)) {
+                try {
+                    await processElement(element);
+                    processedCount++;
+                    console.log(`Successfully processed element ${processedCount}`);
+                } catch (error) {
+                    console.error("Error processing element:", error);
                 }
             }
-        );
+        }
     }
+
+    console.log(`Finished processing. Processed ${processedCount} elements`);
 }
 
 // Helper function to escape string for use in RegExp
@@ -479,41 +671,69 @@ function isElementVisible(element: Element): boolean {
            element.getBoundingClientRect().height > 0;
 }
 
-// 修改applyRewritesToElement函数，使用全局提示框
 function applyRewritesToElement(element: Element, rewrites: { original_index: number, rewritten_text: string }[]) {
     if (!rewrites || rewrites.length === 0) return;
     
-    // 获取原始文本内容 - 使用textContent作为备选
-    let originalText = "";
-    if (element instanceof HTMLElement) {
-        originalText = element.innerText || "";
-    } else {
-        originalText = element.textContent || "";
-    }
+    // Get original text content
+    const originalText = element instanceof HTMLElement ? element.innerText : element.textContent || "";
+    const sentences = splitTextIntoSentences(originalText);
     
-    // 使用更健壮的句子分割方法
-    const sentencesInElement = splitTextIntoSentences(originalText);
-    
-    // 创建一个映射，用于快速查找每个句子索引对应的改写文本
-    const rewritesMap = new Map(rewrites.map(rw => [rw.original_index, rw.rewritten_text]));
-    
-    try {
-        // 使用Range API和TreeWalker处理文本节点
-        processTextNodesWithRanges(element, sentencesInElement, rewritesMap);
-    } catch (error) {
-        console.error("Error using Range API method:", error);
-        // 如果Range方法失败，回退到旧方法
+    // Process each rewrite independently
+    rewrites.forEach(rewrite => {
+        const originalSentence = sentences[rewrite.original_index];
+        if (!originalSentence) return;
+        
+        // Find existing rewritten span for this sentence
+        const existingSpan = Array.from(element.querySelectorAll('.genshred-rewritten'))
+            .find(span => span.getAttribute('data-original-text') === originalSentence);
+            
+        if (existingSpan) return; // Skip if already rewritten
+        
         try {
-            // 回退到TreeWalker方法
-            processTextNodesWithTreeWalker(element, sentencesInElement, rewritesMap);
-        } catch (fallbackError) {
-            console.error("Error using TreeWalker method:", fallbackError);
-            // 最终回退到innerHTML替换（最不理想但最简单的方法）
-            processWithInnerHTML(element, sentencesInElement, rewritesMap);
+            // Create new span for this sentence
+            const span = document.createElement('span');
+            span.textContent = rewrite.rewritten_text;
+            span.classList.add('genshred-rewritten');
+            span.setAttribute('data-original-text', originalSentence);
+            
+            // Add hover events
+            span.addEventListener('mouseover', (e) => {
+                showTooltip(originalSentence, e as MouseEvent, span);
+            });
+            
+            span.addEventListener('mouseout', () => {
+                hideTooltip();
+            });
+            
+            // Find and replace the original sentence
+            replaceTextInElement(element, originalSentence, span);
+        } catch (error) {
+            console.error('Error applying rewrite:', error);
+        }
+    });
+}
+
+// Helper function to replace text in element
+function replaceTextInElement(element: Element, searchText: string, replacement: Node) {
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    let node: Text | null;
+    
+    while (node = walker.nextNode() as Text) {
+        const index = node.textContent?.indexOf(searchText) ?? -1;
+        if (index >= 0) {
+            const before = node.textContent?.slice(0, index) ?? '';
+            const after = node.textContent?.slice(index + searchText.length) ?? '';
+            
+            const fragment = document.createDocumentFragment();
+            if (before) fragment.appendChild(document.createTextNode(before));
+            fragment.appendChild(replacement);
+            if (after) fragment.appendChild(document.createTextNode(after));
+            
+            node.parentNode?.replaceChild(fragment, node);
+            break;
         }
     }
 }
-
 // 使用Range API精确定位和替换文本
 function processTextNodesWithRanges(element: Element, sentences: string[], rewritesMap: Map<number, string>) {
     // 创建一个文档范围
