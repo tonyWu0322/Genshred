@@ -1,7 +1,16 @@
 // content.ts
 import './content.css';
+
+interface ProcessResponse {
+    error?: string;
+    rewritten_sentences?: Array<{
+        original_text: string;
+        rewritten_text: string;
+        original_index: number;
+    }>;
+}
 const PROCESSING_DELAY = 1000; // 1 second delay between processing requests
-const PARAGRAPH_CACHE = new Map<string, any>(); // Cache for processed paragraphs
+const PARAGRAPH_CACHE = new Map<string, any>(); // Cache for processed paragraphs not yet effective 未实装
 const MIN_PARAGRAPH_LENGTH = 100; // Minimum characters to process
 const MAX_PARAGRAPH_LENGTH = 5000; // Maximum characters to process
 // lazyloading
@@ -20,6 +29,7 @@ async function processElement(element: HTMLElement) {
         }
 
         const textBlock = element.innerText.trim();
+        
         console.log("Processing text block:", textBlock.substring(0, 50) + "...");
 
         if (textBlock.length < MIN_PARAGRAPH_LENGTH) {
@@ -49,65 +59,92 @@ async function processElement(element: HTMLElement) {
         }
 
         // Process text in chunks
+        
         const sentences = splitTextIntoSentences(textBlock);
         console.log(`Split text into ${sentences.length} sentences`);
-        
-        const chunkSize = Math.min(Number(currentSettings[STORAGE_KEYS.SENTENCE_COUNT]), 3);
-        
-        for (let i = 0; i < sentences.length; i += chunkSize) {
-            const chunk = sentences.slice(i, i + chunkSize);
-            const chunkText = chunk.join(' ');
-            
-            console.log(`Processing chunk ${i/chunkSize + 1}:`, chunkText.substring(0, 50) + "...");
+        const sentencesWithOriginalData = sentences.map((sentence, index) => ({
+            sentence,
+            index,
+            startIndex: textBlock.indexOf(sentence), // Track original position
+            complexity: calculateComplexityScore(sentence)
+        }));
+        const selectedSentences = selectSentences(
+            sentencesWithOriginalData,
+            Number(currentSettings[STORAGE_KEYS.SENTENCE_COUNT])
+        );
+        // // Calculate complexity scores
+        //  const sentencesWithScores = sentences.map((sentence, index) => ({
+        //     sentence,
+        //     index,
+        //     complexity: calculateComplexityScore(sentence)
+        // }));
 
-            // Send message and wait for response
-            await new Promise((resolve, reject) => {
+        // // Select most complex sentences
+        // const numSentencesToRewrite = Math.min(
+        //     Number(currentSettings[STORAGE_KEYS.SENTENCE_COUNT]), 
+        //     sentencesWithScores.length
+        // );
+        // const selectedSentences = selectSentences(sentencesWithScores, numSentencesToRewrite);
+
+        // Process each selected sentence separately
+        const processedSentences: Array<{
+            original_text: string;
+            rewritten_text: string;
+            original_index: number;
+            start_position: number;
+        }> = [];
+
+        for (const { sentence, index, startIndex } of selectedSentences) {
+            const result = await new Promise<ProcessResponse>((resolve) => {
                 chrome.runtime.sendMessage(
                     {
                         type: "PROCESS_TEXT_BLOCK",
-                        textBlock: chunkText,
-                        numSentences: chunk.length,
+                        textBlock: sentence,
+                        numSentences: 1,
                         promptInstruction: effectivePromptInstruction,
                         customPromptTemplate: effectiveCustomPromptTemplate,
                         userLevel: selectedDifficulty,
-                        originalIndexOffset: i
+                        originalIndex: index
                     },
-                    (response) => {
-                        if (chrome.runtime.lastError) {
-                            console.error("Runtime error:", chrome.runtime.lastError);
-                            reject(chrome.runtime.lastError);
-                            return;
-                        }
-
-                        if (!response?.error && response?.rewritten_sentences) {
-                            const adjustedRewrites = response.rewritten_sentences.map(rw => ({
-                                ...rw,
-                                original_index: rw.original_index + i
-                            }));
-                            
-                            applyRewritesToElement(element, adjustedRewrites);
-                            const chunkKey = `${chunkText}_${effectivePromptInstruction}_${effectiveCustomPromptTemplate}_${chunk.length}`;
-                            PARAGRAPH_CACHE.set(chunkKey, { rewritten_sentences: adjustedRewrites });
-                        }
-                        resolve(response);
-                    }
+                    (response) => resolve(response)
                 );
             });
 
-            // Add delay between chunks
-            await new Promise(resolve => setTimeout(resolve, 100));
+            if (result?.rewritten_sentences?.[0]) {
+                processedSentences.push({
+                    original_text: sentence,
+                    rewritten_text: result.rewritten_sentences[0].rewritten_text,
+                    original_index: index,
+                    start_position: startIndex // Add position information
+                });
+            }
         }
 
-        element.classList.add('genshred-processed');
-        element.classList.remove('genshred-processing');
-        
+        // Sort by position before applying
+        processedSentences.sort((a, b) => a.start_position - b.start_position);
+
+
+        if (processedSentences.length > 0) {
+            applyRewritesToElement(element, processedSentences);
+            element.classList.add('genshred-processed');
+        }
     } catch (error) {
         console.error("Error in processElement:", error);
         element.classList.remove('genshred-processing');
-        throw error;
     }
 }
+// Helper function to calculate complexity score
+function calculateComplexityScore(sentence: string): number {
+    const words = sentence.split(/\s+/).filter(word => word.length > 0);
+    const avgWordLength = words.reduce((sum, word) => sum + word.length, 0) / words.length || 0;
+    return words.length * 0.3 + avgWordLength * 0.7;
+}
 
+// Helper function to select sentences based on complexity
+function selectSentences(sentencesWithScores: { sentence: string, index: number, complexity: number, startIndex: number }[], count: number): { sentence: string, index: number, complexity: number, startIndex: number }[] {
+    const sortedSentences = sentencesWithScores.sort((a, b) => b.complexity - a.complexity);
+    return sortedSentences.slice(0, count);
+}
 
 const STORAGE_KEYS = {
     IS_ON: 'genShredPluginState',
@@ -671,48 +708,70 @@ function isElementVisible(element: Element): boolean {
            element.getBoundingClientRect().height > 0;
 }
 
-function applyRewritesToElement(element: Element, rewrites: { original_index: number, rewritten_text: string }[]) {
-    if (!rewrites || rewrites.length === 0) return;
-    
-    // Get original text content
-    const originalText = element instanceof HTMLElement ? element.innerText : element.textContent || "";
-    const sentences = splitTextIntoSentences(originalText);
-    
-    // Process each rewrite independently
-    rewrites.forEach(rewrite => {
-        const originalSentence = sentences[rewrite.original_index];
-        if (!originalSentence) return;
-        
-        // Find existing rewritten span for this sentence
-        const existingSpan = Array.from(element.querySelectorAll('.genshred-rewritten'))
-            .find(span => span.getAttribute('data-original-text') === originalSentence);
-            
-        if (existingSpan) return; // Skip if already rewritten
-        
-        try {
-            // Create new span for this sentence
-            const span = document.createElement('span');
-            span.textContent = rewrite.rewritten_text;
-            span.classList.add('genshred-rewritten');
-            span.setAttribute('data-original-text', originalSentence);
-            
-            // Add hover events
-            span.addEventListener('mouseover', (e) => {
-                showTooltip(originalSentence, e as MouseEvent, span);
-            });
-            
-            span.addEventListener('mouseout', () => {
-                hideTooltip();
-            });
-            
-            // Find and replace the original sentence
-            replaceTextInElement(element, originalSentence, span);
-        } catch (error) {
-            console.error('Error applying rewrite:', error);
-        }
-    });
-}
+// function applyRewritesToElement(element: Element, rewrites: { original_index: number, rewritten_text: string }[]) {
+//     if (!rewrites || rewrites.length === 0) return;
 
+//     // Get original text content
+//     const originalText = element instanceof HTMLElement ? element.innerText : element.textContent || "";
+//     const sentences = splitTextIntoSentences(originalText);
+
+//     // Create a map of original index to rewritten text
+//     const rewritesMap = new Map<number, string>();
+//     rewrites.forEach(rewrite => {
+//         rewritesMap.set(rewrite.original_index, rewrite.rewritten_text);
+//     });
+
+//     try {
+//         // 尝试使用TreeWalker处理文本节点
+//         processTextNodesWithTreeWalker(element, sentences, rewritesMap);
+//     } catch (e) {
+//         console.warn("TreeWalker failed, falling back to innerHTML method", e);
+//         try {
+//             // 尝试使用Range API精确定位和替换文本
+//             processTextNodesWithRanges(element, sentences, rewritesMap);
+//         } catch (e) {
+//             console.warn("Range API failed, falling back to innerHTML method", e);
+//             // 如果TreeWalker失败，回退到innerHTML方法
+//             processWithInnerHTML(element, sentences, rewritesMap);
+//         }
+//     }
+// }
+function applyRewritesToElement(
+    element: Element, 
+    rewrites: Array<{
+        original_text: string;
+        rewritten_text: string;
+        original_index: number;
+        start_position: number;
+    }>
+) {
+    if (!rewrites || rewrites.length === 0) return;
+
+    const originalText = element.innerHTML;
+    let newHTML = originalText;
+    
+    // Process rewrites from end to start to maintain positions
+    rewrites
+        .sort((a, b) => b.start_position - a.start_position)
+        .forEach(rewrite => {
+            const escapedOriginal = escapeRegExp(rewrite.original_text);
+            const replacement = `<span class="genshred-rewritten" 
+                data-original-text="${escapeHTML(rewrite.original_text)}" 
+                onmouseover="(function(e){
+                    window.dispatchEvent(new CustomEvent('genshred-tooltip-show', 
+                    {detail:{text:'${escapeHTML(rewrite.original_text)}',event:e,element:this}}));
+                })(event)" 
+                onmouseout="window.dispatchEvent(new CustomEvent('genshred-tooltip-hide'))"
+            >${escapeHTML(rewrite.rewritten_text)}</span>`;
+
+            newHTML = newHTML.replace(
+                new RegExp(escapedOriginal, 'g'), 
+                replacement
+            );
+        });
+
+    element.innerHTML = newHTML;
+}
 // Helper function to replace text in element
 function replaceTextInElement(element: Element, searchText: string, replacement: Node) {
     const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
@@ -1017,35 +1076,60 @@ function processWithInnerHTML(element: Element, sentences: string[], rewritesMap
 
 // 更健壮的句子分割方法
 function splitTextIntoSentences(text: string): string[] {
-    // 基本的句子分割正则表达式
-    const basicSentenceRegex = /[^.!?]+[.!?]+/g;
+    // Define sentence ending patterns
+    const sentenceEndPatterns = [
+        /[.!?](?=\s+[A-Z])/g,           // Standard sentence endings followed by capital letter
+        /[.!?](?=\s*$)/g,               // Endings at the end of text
+        /[.!?](?=\s*["'""'])/g,         // Endings followed by quotes
+        /(?<=\b(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|vs|etc|fig|e\.g|i\.e)\.)(?!\s*[A-Z])/gi, // Common abbreviations
+    ];
+
+    // Clean and normalize the text
+    let cleanedText = text
+        .replace(/\s+/g, ' ')           // Normalize whitespace
+        .replace(/\n+/g, ' ')           // Replace newlines with spaces
+        .replace(/([.!?])\1+/g, '$1')   // Replace multiple punctuation with single
+        .trim();
+
+    // Split text into potential sentences while preserving separators
+    let sentences: string[] = [cleanedText];
     
-    // 处理特殊情况的更复杂正则表达式
-    // 例如：处理引号内的句子、缩写词中的句号等
-    const complexSentenceRegex = /[^.!?]*(?:"[^"]*"[^.!?]*)*[.!?]+/g;
-    
-    let sentences: string[] = [];
-    let match;
-    
-    // 尝试使用复杂正则表达式
-    while ((match = complexSentenceRegex.exec(text)) !== null) {
-        sentences.push(match[0].trim());
-    }
-    
-    // 如果复杂正则表达式没有找到任何句子，回退到基本正则表达式
-    if (sentences.length === 0) {
-        while ((match = basicSentenceRegex.exec(text)) !== null) {
-            sentences.push(match[0].trim());
-        }
-    }
-    
-    // 如果仍然没有找到句子，将整个文本作为一个句子
-    if (sentences.length === 0 && text.trim()) {
-        sentences.push(text.trim());
-    }
-    
-    return sentences;
+    // Apply each pattern to further split sentences
+    sentenceEndPatterns.forEach(pattern => {
+        sentences = sentences.flatMap(segment => {
+            return segment.split(pattern).map(s => s.trim()).filter(s => s.length > 0);
+        });
+    });
+
+    // Post-processing to clean up and validate sentences
+    return sentences
+        .map(sentence => {
+            // Trim and clean up each sentence
+            return sentence
+                .trim()
+                .replace(/^[""'']/g, '')     // Remove leading quotes
+                .replace(/[""'']$/g, '')     // Remove trailing quotes
+                .trim();
+        })
+        .filter(sentence => {
+            // Filter out invalid or too short sentences
+            return (
+                sentence.length >= 10 &&          // Minimum length
+                /[a-zA-Z]/.test(sentence) &&     // Contains at least one letter
+                !/^[^a-zA-Z]*$/.test(sentence)   // Not just numbers and symbols
+            );
+        })
+        .map(sentence => {
+            // Ensure sentences end with proper punctuation
+            if (!/[.!?]$/.test(sentence)) {
+                return sentence + '.';
+            }
+            return sentence;
+        });
 }
+
+
+
 
 // Restore original text logic (updated for data-original-text)
 function restoreOriginalText() {
