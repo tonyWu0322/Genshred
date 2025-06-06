@@ -494,12 +494,18 @@ function isElementInViewport(el: HTMLElement, buffer: number = 300): boolean {
     const windowHeight = window.innerHeight || document.documentElement.clientHeight;
     const windowWidth = window.innerWidth || document.documentElement.clientWidth;
     
-    return (
-        rect.top >= (0 - buffer) &&
-        rect.left >= 0 &&
-        rect.bottom <= (windowHeight + buffer) &&
-        rect.right <= windowWidth
+    // Consider element visible if:
+    // 1. Any part of it is in viewport (with buffer)
+    // 2. Or if it's very tall (longer than viewport), process it when top enters view
+    const isPartiallyVisible = (
+        (rect.top < (windowHeight + buffer) && rect.bottom > -buffer) && // Vertical visibility
+        (rect.left >= -buffer && rect.right <= (windowWidth + buffer))   // Horizontal visibility
     );
+
+    const isTallElement = rect.height > windowHeight * 1.5; // Element is taller than 1.5 viewport heights
+    const isTallElementEnteringView = isTallElement && rect.top < (windowHeight / 2); // Top half entering view
+
+    return isPartiallyVisible || isTallElementEnteringView;
 }
 
 function setupIntersectionObserver() {
@@ -508,25 +514,46 @@ function setupIntersectionObserver() {
     }
 
     intersectionObserver = new IntersectionObserver(
-        (entries) => {
-            entries.forEach(entry => {
-                if (entry.isIntersecting && currentSettings[STORAGE_KEYS.IS_ON]) {
-                    const element = entry.target;
-                    if (!element.classList.contains('genshred-processed')) {
-                        processElement(element as HTMLElement);
-                    }
-                    // Stop observing after processing
-                    intersectionObserver?.unobserve(element);
+        async (entries) => {
+            for (const entry of entries) {
+                const element = entry.target as HTMLElement;
+                
+                // Skip if plugin is off or element is already processed
+                if (!currentSettings[STORAGE_KEYS.IS_ON] || 
+                    element.classList.contains('genshred-processed') ||
+                    element.classList.contains('genshred-processing')) {
+                    continue;
                 }
-            });
+
+                // Process if element is entering viewport
+                if (entry.isIntersecting) {
+                    try {
+                        await processElement(element);
+                    } catch (error) {
+                        console.error("Error processing element:", error);
+                        element.classList.remove('genshred-processing');
+                    }
+                }
+            }
         },
         {
-            rootMargin: '300px 0px', // Start loading 300px before element enters viewport
-            threshold: 0.1
+            rootMargin: '500px 0px',
+            threshold: [0, 0.1]
         }
     );
-}
 
+    // Add scroll event listener for dynamic content
+    const handleScroll = debounce(() => {
+        if (currentSettings[STORAGE_KEYS.IS_ON]) {
+            processParagraphs();
+        }
+    }, 200);
+
+    // Remove existing listener if any
+    window.removeEventListener('scroll', handleScroll);
+    // Add new scroll listener
+    window.addEventListener('scroll', handleScroll, { passive: true });
+}
 // --- Function to process paragraphs and send to backend ---
 // async function processParagraphs() {
 //     if (!currentSettings[STORAGE_KEYS.IS_ON]) return;
@@ -657,47 +684,48 @@ function setupIntersectionObserver() {
 // }
 async function processParagraphs() {
     if (!currentSettings[STORAGE_KEYS.IS_ON]) {
-        console.log("Plugin is turned of");
+        console.log("Plugin is turned off");
         return;
     }
     console.log("Processing paragraphs...");
-    // Set up intersection observer
-    setupIntersectionObserver();
     
     // Select all potential text elements
-    const textElements = Array.from(document.querySelectorAll("p, div, span, h1, h2, h3, h4, h5, h6, li, td, th"));
-    console.log(`Found ${textElements.length} potential elements to process`);
+    const textElements = Array.from(document.querySelectorAll("p, div, span, h1, h2, h3, h4, h5, h6, li, td, th"))
+        .filter(element => {
+            return element instanceof HTMLElement && 
+                !element.classList.contains('genshred-processed') &&
+                !element.classList.contains('genshred-processing') &&
+                !element.closest('.genshred-rewritten') &&
+                !observedElements.has(element) &&  // Add this check
+                element.textContent?.trim().length >= MIN_PARAGRAPH_LENGTH;
+        });
 
-    let processedCount = 0;
-       // Process each visible element immediately and independently
+    console.log(`Found ${textElements.length} new elements to process`);
+
+    // Set up intersection observer if not already set up
+    if (!intersectionObserver) {
+        setupIntersectionObserver();
+    }
+
+    // Process elements and observe them
     for (const element of textElements) {
-        if (element instanceof HTMLElement && 
-            !observedElements.has(element) && 
-            isElementVisible(element)) {
-            
-            console.log("Processing element:", element.textContent?.substring(0, 50) + "...");
-            
-            // Add to observed set
+        if (element instanceof HTMLElement) {
             observedElements.add(element);
-
-            // Start observing the element
             intersectionObserver?.observe(element);
-
-            // If element is in viewport, process it immediately
+            
+            // If element is already in viewport, process it immediately
             if (isElementInViewport(element)) {
                 try {
                     await processElement(element);
-                    processedCount++;
-                    console.log(`Successfully processed element ${processedCount}`);
                 } catch (error) {
                     console.error("Error processing element:", error);
+                    element.classList.remove('genshred-processing');
                 }
             }
         }
     }
-
-    console.log(`Finished processing. Processed ${processedCount} elements`);
 }
+
 
 // Helper function to escape string for use in RegExp
 function escapeRegExp(string: string): string {
