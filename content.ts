@@ -236,6 +236,15 @@ function hideTooltip() {
     }
 }
 
+// 加载动画
+// NEW: Function to create a loading spinner element
+function createLoadingSpinner(): HTMLElement {
+    const spinner = document.createElement('span');
+    spinner.className = 'genshred-loading-spinner';
+    spinner.title = 'Processing...'; // Tooltip for accessibility
+    return spinner;
+}
+
 // 添加防抖函数，避免频繁处理
 function debounce<F extends (...args: any[]) => any>(func: F, wait: number): (...args: Parameters<F>) => void {
     let timeout: number | undefined;
@@ -747,31 +756,84 @@ function applyRewritesToElement(
 ) {
     if (!rewrites || rewrites.length === 0) return;
 
-    const originalText = element.innerHTML;
-    let newHTML = originalText;
+    // Get the full HTML and text content
+    const originalHTML = element.innerHTML;
     
-    // Process rewrites from end to start to maintain positions
-    rewrites
-        .sort((a, b) => b.start_position - a.start_position)
-        .forEach(rewrite => {
-            const escapedOriginal = escapeRegExp(rewrite.original_text);
-            const replacement = `<span class="genshred-rewritten" 
-                data-original-text="${escapeHTML(rewrite.original_text)}" 
-                onmouseover="(function(e){
-                    window.dispatchEvent(new CustomEvent('genshred-tooltip-show', 
-                    {detail:{text:'${escapeHTML(rewrite.original_text)}',event:e,element:this}}));
-                })(event)" 
-                onmouseout="window.dispatchEvent(new CustomEvent('genshred-tooltip-hide'))"
-            >${escapeHTML(rewrite.rewritten_text)}</span>`;
-
-            newHTML = newHTML.replace(
-                new RegExp(escapedOriginal, 'g'), 
-                replacement
-            );
-        });
-
-    element.innerHTML = newHTML;
+    // Create a temporary element to work with the HTML
+    const temp = document.createElement('div');
+    temp.innerHTML = originalHTML;
+    
+    // Sort rewrites from last to first to maintain positions
+    const sortedRewrites = [...rewrites].sort((a, b) => b.start_position - a.start_position);
+    
+    for (const rewrite of sortedRewrites) {
+        // Find all text nodes
+        const textNodes: Text[] = [];
+        const walker = document.createTreeWalker(temp, NodeFilter.SHOW_TEXT);
+        
+        let node: Text | null;
+        while (node = walker.nextNode() as Text) {
+            textNodes.push(node);
+        }
+        
+        // Find the text node containing our target text
+        let currentPosition = 0;
+        let targetNode: Text | null = null;
+        let targetIndex = -1;
+        
+        for (const node of textNodes) {
+            const text = node.textContent || '';
+            if (currentPosition <= rewrite.start_position && 
+                currentPosition + text.length >= rewrite.start_position + rewrite.original_text.length) {
+                targetNode = node;
+                targetIndex = rewrite.start_position - currentPosition;
+                break;
+            }
+            currentPosition += text.length;
+        }
+        
+        if (targetNode && targetIndex >= 0) {
+            const beforeText = targetNode.textContent?.slice(0, targetIndex) || '';
+            const afterText = targetNode.textContent?.slice(targetIndex + rewrite.original_text.length) || '';
+            
+            // Create the replacement span
+            const span = document.createElement('span');
+            span.className = 'genshred-rewritten';
+            span.setAttribute('data-original-text', rewrite.original_text);
+            span.textContent = rewrite.rewritten_text;
+            
+            // Replace the text node with our three new nodes
+            const fragment = document.createDocumentFragment();
+            if (beforeText) fragment.appendChild(document.createTextNode(beforeText));
+            fragment.appendChild(span);
+            if (afterText) fragment.appendChild(document.createTextNode(afterText));
+            
+            targetNode.parentNode?.replaceChild(fragment, targetNode);
+        }
+    }
+    
+    // Update the original element
+    element.innerHTML = temp.innerHTML;
+    
+    // Add event listeners
+    element.querySelectorAll('.genshred-rewritten').forEach(span => {
+        if (!span.hasAttribute('data-listeners-added')) {
+            span.addEventListener('mouseover', (e) => {
+                const originalText = span.getAttribute('data-original-text');
+                if (originalText) {
+                    showTooltip(originalText, e as MouseEvent, span);
+                }
+            });
+            
+            span.addEventListener('mouseout', () => {
+                hideTooltip();
+            });
+            
+            span.setAttribute('data-listeners-added', 'true');
+        }
+    });
 }
+
 // Helper function to replace text in element
 function replaceTextInElement(element: Element, searchText: string, replacement: Node) {
     const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
@@ -1076,58 +1138,23 @@ function processWithInnerHTML(element: Element, sentences: string[], rewritesMap
 
 // 更健壮的句子分割方法
 function splitTextIntoSentences(text: string): string[] {
-    // Define sentence ending patterns
-    const sentenceEndPatterns = [
-        /[.!?](?=\s+[A-Z])/g,           // Standard sentence endings followed by capital letter
-        /[.!?](?=\s*$)/g,               // Endings at the end of text
-        /[.!?](?=\s*["'""'])/g,         // Endings followed by quotes
-        /(?<=\b(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|vs|etc|fig|e\.g|i\.e)\.)(?!\s*[A-Z])/gi, // Common abbreviations
-    ];
-
-    // Clean and normalize the text
-    let cleanedText = text
-        .replace(/\s+/g, ' ')           // Normalize whitespace
-        .replace(/\n+/g, ' ')           // Replace newlines with spaces
-        .replace(/([.!?])\1+/g, '$1')   // Replace multiple punctuation with single
+    // First, clean the text
+    const cleanText = text
+        .replace(/<[^>]+>/g, ' ')  // Remove HTML tags
+        .replace(/\s+/g, ' ')      // Normalize whitespace
         .trim();
 
-    // Split text into potential sentences while preserving separators
-    let sentences: string[] = [cleanedText];
+    // Split into sentences
+    const sentences = cleanText.match(/[^.!?]+[.!?]+/g) || [];
     
-    // Apply each pattern to further split sentences
-    sentenceEndPatterns.forEach(pattern => {
-        sentences = sentences.flatMap(segment => {
-            return segment.split(pattern).map(s => s.trim()).filter(s => s.length > 0);
-        });
-    });
-
-    // Post-processing to clean up and validate sentences
     return sentences
-        .map(sentence => {
-            // Trim and clean up each sentence
-            return sentence
-                .trim()
-                .replace(/^[""'']/g, '')     // Remove leading quotes
-                .replace(/[""'']$/g, '')     // Remove trailing quotes
-                .trim();
-        })
-        .filter(sentence => {
-            // Filter out invalid or too short sentences
-            return (
-                sentence.length >= 10 &&          // Minimum length
-                /[a-zA-Z]/.test(sentence) &&     // Contains at least one letter
-                !/^[^a-zA-Z]*$/.test(sentence)   // Not just numbers and symbols
-            );
-        })
-        .map(sentence => {
-            // Ensure sentences end with proper punctuation
-            if (!/[.!?]$/.test(sentence)) {
-                return sentence + '.';
-            }
-            return sentence;
+        .map(s => s.trim())
+        .filter(s => {
+            return s.length >= 10 && // Minimum length
+                   /[a-zA-Z]/.test(s) && // Contains letters
+                   !/^[^a-zA-Z]*$/.test(s); // Not just symbols
         });
 }
-
 
 
 
