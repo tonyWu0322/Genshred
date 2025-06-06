@@ -34,6 +34,7 @@ async function getPromptForDifficulty(difficultyLevel: string): Promise<string> 
     return storedMapping[mappingStorageKey][difficultyLevel];
   } else {
     // Default mappings if not found in storage
+    console.log(`No stored prompt found for ${difficultyLevel}, using default mapping.`);
     const defaultMapping: Record<string, string> = {
       "Easy": "Simplify vocabulary and sentence structure for a beginner (A2 CEFR level).",
       "Normal": "Rewrite for an intermediate English speaker (B2 CEFR level). Use clear and concise language.",

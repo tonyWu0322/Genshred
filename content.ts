@@ -96,12 +96,17 @@ async function processElement(element: HTMLElement) {
 
         for (const { sentence, index, startIndex } of selectedSentences) {
             const result = await new Promise<ProcessResponse>((resolve) => {
+                // Determine which prompt to use based on difficulty level
+                // let promptToUse = selectedDifficulty === "Custom_1" 
+                //     ? effectiveCustomPromptTemplate 
+                //     : effectivePromptInstruction;
+                let promptToUse = effectivePromptInstruction; // Use the mapped instruction
                 chrome.runtime.sendMessage(
                     {
                         type: "PROCESS_TEXT_BLOCK",
                         textBlock: sentence,
                         numSentences: 1,
-                        promptInstruction: effectivePromptInstruction,
+                        promptInstruction: promptToUse,  // Use the correctly selected prompt
                         customPromptTemplate: effectiveCustomPromptTemplate,
                         userLevel: selectedDifficulty,
                         originalIndex: index
@@ -154,12 +159,12 @@ const STORAGE_KEYS = {
 };
 
 // NEW: Use the consistent default for CUSTOM_PROMPT
-const CUSTOM_PROMPT_DEFAULT = "Rewrite the following sentence(s) for a user with language level {user_level}. Simplify vocabulary and sentence structure if necessary, while retaining the original meaning:\n\n{sentences_to_rewrite}";
+// const CUSTOM_PROMPT_DEFAULT = "Rewrite the following sentence(s) for a user with language level {user_level}. Simplify vocabulary and sentence structure if necessary, while retaining the original meaning:\n\n{sentences_to_rewrite}";
 const DEFAULT_SETTINGS = {
   [STORAGE_KEYS.IS_ON]: true,
   [STORAGE_KEYS.SENTENCE_COUNT]: 5,
   [STORAGE_KEYS.DIFFICULTY_LEVEL]: 'Normal',
-  [STORAGE_KEYS.CUSTOM_PROMPT]: CUSTOM_PROMPT_DEFAULT // Use the consistent default
+//   [STORAGE_KEYS.CUSTOM_PROMPT]: CUSTOM_PROMPT_DEFAULT // Use the consistent default
 };
 
 // Variables to hold current settings state in content script
@@ -337,7 +342,7 @@ async function loadSettings() {
         [STORAGE_KEYS.IS_ON]: storedSettings[STORAGE_KEYS.IS_ON] ?? DEFAULT_SETTINGS[STORAGE_KEYS.IS_ON],
         [STORAGE_KEYS.SENTENCE_COUNT]: storedSettings[STORAGE_KEYS.SENTENCE_COUNT] ?? DEFAULT_SETTINGS[STORAGE_KEYS.SENTENCE_COUNT],
         [STORAGE_KEYS.DIFFICULTY_LEVEL]: storedSettings[STORAGE_KEYS.DIFFICULTY_LEVEL] ?? DEFAULT_SETTINGS[STORAGE_KEYS.DIFFICULTY_LEVEL],
-        [STORAGE_KEYS.CUSTOM_PROMPT]: storedSettings[STORAGE_KEYS.CUSTOM_PROMPT] ?? DEFAULT_SETTINGS[STORAGE_KEYS.CUSTOM_PROMPT],
+        // [STORAGE_KEYS.CUSTOM_PROMPT]: storedSettings[STORAGE_KEYS.CUSTOM_PROMPT] ?? DEFAULT_SETTINGS[STORAGE_KEYS.CUSTOM_PROMPT],
     };
 
     // Update difficulty mappings
@@ -386,11 +391,11 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
                 settingsChanged = true;
                 console.log(`Difficulty level changed to: ${currentSettings[STORAGE_KEYS.DIFFICULTY_LEVEL]}`);
             }
-            else if (key === STORAGE_KEYS.CUSTOM_PROMPT) {
-                currentSettings[STORAGE_KEYS.CUSTOM_PROMPT] = changes[key].newValue;
-                settingsChanged = true;
-                console.log(`Custom prompt template changed`);
-            }
+            // else if (key === STORAGE_KEYS.CUSTOM_PROMPT) {
+            //     currentSettings[STORAGE_KEYS.CUSTOM_PROMPT] = changes[key].newValue;
+            //     settingsChanged = true;
+            //     console.log(`Custom prompt template changed`);
+            // }
             else if (key === 'genShredDifficultyMapping') {
                 currentDifficultyMappings = changes[key].newValue;
                 settingsChanged = true;
