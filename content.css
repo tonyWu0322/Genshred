@@ -48,3 +48,40 @@
 .genshred-rewritten::before {
     display: none !important;
 }
+
+/* Basic spinner */
+.genshred-loading-spinner {
+    border: 3px solid #f3f3f3; /* Light grey */
+    border-top: 3px solid #3498db; /* Blue */
+    border-radius: 50%;
+    width: 16px;
+    height: 16px;
+    animation: spin 1s linear infinite;
+    display: inline-block; /* Aligns with text */
+    vertical-align: middle; /* Keeps it aligned vertically */
+    margin-left: 5px; /* Spacing from text */
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Style for the wrapper around original text + spinner */
+.genshred-original-text-wrapper {
+    position: relative; /* For tooltip positioning if needed */
+    display: inline; /* To not break flow */
+}
+
+/* Hide original text while loading, if preferred */
+.genshred-original-text-wrapper.loading .original-text {
+    /* You could hide this or reduce its opacity */
+    opacity: 0.5;
+}
+
+/* Optional: Placeholder for rewritten text while loading */
+.genshred-loading-placeholder {
+    color: #888;
+    font-style: italic;
+    margin-left: 5px;
+}
