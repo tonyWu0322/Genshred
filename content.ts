@@ -60,7 +60,7 @@ async function processElement(element: HTMLElement) {
 
         // Process text in chunks
         
-        const sentences = splitTextIntoSentences(textBlock);
+        const sentences = await splitTextIntoSentences(textBlock);
         console.log(`Split text into ${sentences.length} sentences`);
         const sentencesWithOriginalData = sentences.map((sentence, index) => ({
             sentence,
@@ -1169,27 +1169,51 @@ function processWithInnerHTML(element: Element, sentences: string[], rewritesMap
     });
 }
 
-// 更健壮的句子分割方法
-function splitTextIntoSentences(text: string): string[] {
-    // First, clean the text
-    const cleanText = text
-        .replace(/<[^>]+>/g, ' ')  // Remove HTML tags
-        .replace(/\s+/g, ' ')      // Normalize whitespace
-        .trim();
-
-    // Split into sentences
-    const sentences = cleanText.match(/[^.!?]+[.!?]+/g) || [];
-    
-    return sentences
-        .map(s => s.trim())
-        .filter(s => {
-            return s.length >= 10 && // Minimum length
-                   /[a-zA-Z]/.test(s) && // Contains letters
-                   !/^[^a-zA-Z]*$/.test(s); // Not just symbols
+// 更健壮的句子分割方法 - 现在会调用后端API
+async function splitTextIntoSentences(text: string): Promise<string[]> {
+    try {
+        const response = await fetch('http://127.0.0.1:5000/split_sentences', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ text }),
+            signal: AbortSignal.timeout(3000) // 3秒超时
         });
+
+        if (!response.ok) {
+            console.error('Sentence splitting API failed:', response.statusText);
+            throw new Error(`API request failed with status ${response.status}`);
+        }
+
+        const data = await response.json();
+        if (data && Array.isArray(data.sentences)) {
+            console.log("Sentences successfully split by backend API.");
+            return data.sentences.filter(s => s.length > 0 && /[a-zA-Z]/.test(s));
+        } else {
+            console.error('Invalid response from sentence splitting API:', data);
+            throw new Error('Invalid API response format');
+        }
+    } catch (error) {
+        console.warn('Backend sentence splitting failed, falling back to local regex-based method.', error);
+        
+        // --- Fallback to original regex-based method ---
+        const cleanText = text
+            .replace(/<[^>]+>/g, ' ')  // Remove HTML tags
+            .replace(/\s+/g, ' ')      // Normalize whitespace
+            .trim();
+
+        const sentences = cleanText.match(/[^.!?]+[.!?]+/g) || [cleanText]; // Fallback to whole text if no sentences found
+        
+        return sentences
+            .map(s => s.trim())
+            .filter(s => {
+                return s.length >= 10 && // Minimum length
+                       /[a-zA-Z]/.test(s) && // Contains letters
+                       !/^[^a-zA-Z]*$/.test(s); // Not just symbols
+            });
+    }
 }
-
-
 
 // Restore original text logic (updated for data-original-text)
 function restoreOriginalText() {
