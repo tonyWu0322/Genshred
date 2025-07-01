@@ -1,4 +1,5 @@
 // This script will now act as a proxy to forward messages to the backend server
+import { SERVER_URL } from "./config";
 
 // Function to generate or retrieve a unique user ID
 async function getUserId(): Promise<string> {
@@ -101,7 +102,7 @@ chrome.runtime.onMessage.addListener(
       const difficultyPrompt = await getPromptForDifficulty(userLevel);
 
       try {
-        const backendUrl = "http://localhost:5000/process_text"; // <--- REPLACE WITH YOUR BACKEND URL
+        const backendUrl = `${SERVER_URL}/process_text`; // 使用配置文件中的URL
         console.log("Sending text block to backend:", { userId, numSentences, userLevel, promptInstruction: difficultyPrompt, customPromptTemplate, textBlock: textBlock.substring(0, 100) + "..." });
 
         const response = await fetch(backendUrl, {
@@ -146,7 +147,7 @@ chrome.runtime.onMessage.addListener(
         const userId = await getUserId(); // Get the user ID
 
         try {
-             const backendUrl = "YOUR_BACKEND_SERVER_URL/track_event"; // <--- REPLACE WITH YOUR BACKEND URL
+             const backendUrl = `${SERVER_URL}/track_event`; // 使用配置文件中的URL
              console.log("Sending track event to backend:", { userId, eventType, eventData });
 
              const response = await fetch(backendUrl, {

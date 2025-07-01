@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import './UserModal.css';
+import { SERVER_URL } from './config';
 
 interface UserModalProps {
   isOpen: boolean;
@@ -71,7 +72,7 @@ const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose }) => {
       setStatusMessage('正在连接服务器...');
       
       // 发送登录请求到后端
-      const response = await fetch('http://localhost:5000/login', {
+      const response = await fetch(`${SERVER_URL}/login`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -105,7 +106,7 @@ const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose }) => {
       }
     } catch (error) {
       console.error('Login error:', error);
-      setStatusMessage('连接服务器失败，请确保后端服务器已启动 (http://localhost:5000)');
+      setStatusMessage(`连接服务器失败，请确保后端服务器已启动 (${SERVER_URL})`);
     }
   };
 
@@ -116,7 +117,7 @@ const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose }) => {
       setStatusMessage('正在连接服务器...');
       
       // 发送注册请求到后端
-      const response = await fetch('http://localhost:5000/register', {
+      const response = await fetch(`${SERVER_URL}/register`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -139,7 +140,7 @@ const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose }) => {
       }
     } catch (error) {
       console.error('Registration error:', error);
-      setStatusMessage('连接服务器失败，请确保后端服务器已启动 (http://localhost:5000)');
+      setStatusMessage(`连接服务器失败，请确保后端服务器已启动 (${SERVER_URL})`);
     }
   };
 
