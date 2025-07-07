@@ -1,5 +1,6 @@
 // content.ts
 import './content.css';
+import { SERVER_URL } from "./config";
 
 interface ProcessResponse {
     error?: string;
@@ -1172,7 +1173,8 @@ function processWithInnerHTML(element: Element, sentences: string[], rewritesMap
 // 更健壮的句子分割方法 - 现在会调用后端API
 async function splitTextIntoSentences(text: string): Promise<string[]> {
     try {
-        const response = await fetch('http://127.0.0.1:5000/split_sentences', {
+        const backendUrl = `${SERVER_URL}/split_sentences`;
+        const response = await fetch(backendUrl, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
