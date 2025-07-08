@@ -149,53 +149,53 @@ chrome.runtime.onMessage.addListener(
 
     // Keep other message listeners if you have them...
     // ... (your other message listeners if any) ...
-    if (message.type === "PROCESS_TEXT_BLOCK") {
-      // NEW: Destructure promptInstruction and customPromptTemplate
-      const { textBlock, numSentences, userLevel, promptInstruction, customPromptTemplate } = message;
-      console.log("Received text block for processing:", { textBlock: textBlock.substring(0, 100) + "...", numSentences, userLevel, promptInstruction, customPromptTemplate });
-      const userId = await getUserId();
+    // if (message.type === "PROCESS_TEXT_BLOCK") {
+    //   // NEW: Destructure promptInstruction and customPromptTemplate
+    //   const { textBlock, numSentences, userLevel, promptInstruction, customPromptTemplate } = message;
+    //   console.log("Received text block for processing:", { textBlock: textBlock.substring(0, 100) + "...", numSentences, userLevel, promptInstruction, customPromptTemplate });
+    //   const userId = await getUserId();
       
-      // Get the prompt for the selected difficulty level
-      const difficultyPrompt = await getPromptForDifficulty(userLevel);
+    //   // Get the prompt for the selected difficulty level
+    //   const difficultyPrompt = await getPromptForDifficulty(userLevel);
 
-      try {
-        const backendUrl = `${SERVER_URL}/process_text`; // 使用配置文件中的URL
-        console.log("Sending text block to backend:", { userId, numSentences, userLevel, promptInstruction: difficultyPrompt, customPromptTemplate, textBlock: textBlock.substring(0, 100) + "..." });
+    //   try {
+    //     const backendUrl = `${SERVER_URL}/process_text`; // 使用配置文件中的URL
+    //     console.log("Sending text block to backend:", { userId, numSentences, userLevel, promptInstruction: difficultyPrompt, customPromptTemplate, textBlock: textBlock.substring(0, 100) + "..." });
 
-        const response = await fetch(backendUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            userId: userId,
-            text: textBlock,
-            numSentences: numSentences,
-            userLevel: userLevel, // This is the 'Easy'/'Normal'/'Hard' string
-            // NEW: Pass the explicit prompt instruction from the difficulty mapping
-            promptInstruction: difficultyPrompt,
-            customPromptTemplate: customPromptTemplate
-          })
-        });
+    //     const response = await fetch(backendUrl, {
+    //       method: "POST",
+    //       headers: {
+    //         "Content-Type": "application/json",
+    //       },
+    //       body: JSON.stringify({
+    //         userId: userId,
+    //         text: textBlock,
+    //         numSentences: numSentences,
+    //         userLevel: userLevel, // This is the 'Easy'/'Normal'/'Hard' string
+    //         // NEW: Pass the explicit prompt instruction from the difficulty mapping
+    //         promptInstruction: difficultyPrompt,
+    //         customPromptTemplate: customPromptTemplate
+    //       })
+    //     });
 
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.error(`Backend HTTP error! Status: ${response.status}`, errorText);
-            sendResponse({ error: `Backend error: ${response.status} - ${errorText}` });
-            return true;
-        }
+    //     if (!response.ok) {
+    //         const errorText = await response.text();
+    //         console.error(`Backend HTTP error! Status: ${response.status}`, errorText);
+    //         sendResponse({ error: `Backend error: ${response.status} - ${errorText}` });
+    //         return true;
+    //     }
 
-        const data = await response.json();
-        console.log("Received backend response:", data);
-        sendResponse(data);
+    //     const data = await response.json();
+    //     console.log("Received backend response:", data);
+    //     sendResponse(data);
 
-      } catch (err) {
-        console.error("Error calling backend /process_text:", err);
-        sendResponse({ error: `Frontend fetch error: ${err.message}` });
-      }
+    //   } catch (err) {
+    //     console.error("Error calling backend /process_text:", err);
+    //     sendResponse({ error: `Frontend fetch error: ${err.message}` });
+    //   }
 
-      return true;
-    }
+    //   return true;
+    // }
 
     // NEW: Handle message to split sentences
     if (message.type === "SPLIT_SENTENCES") {

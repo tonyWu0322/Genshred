@@ -53,13 +53,13 @@ async function processElement(element: HTMLElement) {
         const cacheKey = `${textBlock}_${effectivePromptInstruction}_${effectiveCustomPromptTemplate}_${currentSettings[STORAGE_KEYS.SENTENCE_COUNT]}`;
 
         if (PARAGRAPH_CACHE.has(cacheKey)) {
-            console.log("Using cached response");
-            const cachedResponse = PARAGRAPH_CACHE.get(cacheKey);
-            await applyRewritesToElement(element, cachedResponse.rewritten_sentences);
-            element.classList.add('genshred-processed');
-            element.classList.remove('genshred-processing');
+            // console.log("Using cached response");
+            // const cachedResponse = PARAGRAPH_CACHE.get(cacheKey);
+            // await applyRewritesToElement(element, cachedResponse.rewritten_sentences,sentences);
+            // element.classList.add('genshred-processed');
+            // element.classList.remove('genshred-processing');
             return;
-        }
+        }// This is to fix later
 
         // Process text in chunks
         
@@ -143,7 +143,7 @@ async function processElement(element: HTMLElement) {
 
 
         if (processedSentences.length > 0) {
-            applyRewritesToElement(element, processedSentences);
+            applyRewritesToElement(element, processedSentences, sentences); // Pass all original sentences
             element.classList.add('genshred-processed');
         }
     } catch (error) {
@@ -637,121 +637,105 @@ function isElementVisible(element: Element): boolean {
            element.getBoundingClientRect().height > 0;
 }
 
-// function applyRewritesToElement(element: Element, rewrites: { original_index: number, rewritten_text: string }[]) {
-//     if (!rewrites || rewrites.length === 0) return;
-
-//     // Get original text content
-//     const originalText = element instanceof HTMLElement ? element.innerText : element.textContent || "";
-//     const sentences = splitTextIntoSentences(originalText);
-
-//     // Create a map of original index to rewritten text
-//     const rewritesMap = new Map<number, string>();
-//     rewrites.forEach(rewrite => {
-//         rewritesMap.set(rewrite.original_index, rewrite.rewritten_text);
-//     });
-
-//     try {
-//         // 尝试使用TreeWalker处理文本节点
-//         processTextNodesWithTreeWalker(element, sentences, rewritesMap);
-//     } catch (e) {
-//         console.warn("TreeWalker failed, falling back to innerHTML method", e);
-//         try {
-//             // 尝试使用Range API精确定位和替换文本
-//             processTextNodesWithRanges(element, sentences, rewritesMap);
-//         } catch (e) {
-//             console.warn("Range API failed, falling back to innerHTML method", e);
-//             // 如果TreeWalker失败，回退到innerHTML方法
-//             processWithInnerHTML(element, sentences, rewritesMap);
-//         }
-//     }
-// }
 function applyRewritesToElement(
-    element: Element, 
+    element: Element,
     rewrites: Array<{
         original_text: string;
         rewritten_text: string;
         original_index: number;
         start_position: number;
-    }>
+    }>,
+    allOriginalSentences: string[] // NEW: Added allOriginalSentences parameter
 ) {
-    if (!rewrites || rewrites.length === 0) return;
-
-    // Get the full HTML and text content
-    const originalHTML = element.innerHTML;
-    
-    // Create a temporary element to work with the HTML
-    const temp = document.createElement('div');
-    temp.innerHTML = originalHTML;
-    
-    // Sort rewrites from last to first to maintain positions
-    const sortedRewrites = [...rewrites].sort((a, b) => b.start_position - a.start_position);
-    
-    for (const rewrite of sortedRewrites) {
-        // Find all text nodes
-        const textNodes: Text[] = [];
-        const walker = document.createTreeWalker(temp, NodeFilter.SHOW_TEXT);
-        
-        let node: Text | null;
-        while (node = walker.nextNode() as Text) {
-            textNodes.push(node);
-        }
-        
-        // Find the text node containing our target text
-        let currentPosition = 0;
-        let targetNode: Text | null = null;
-        let targetIndex = -1;
-        
-        for (const node of textNodes) {
-            const text = node.textContent || '';
-            if (currentPosition <= rewrite.start_position && 
-                currentPosition + text.length >= rewrite.start_position + rewrite.original_text.length) {
-                targetNode = node;
-                targetIndex = rewrite.start_position - currentPosition;
-                break;
-            }
-            currentPosition += text.length;
-        }
-        
-        if (targetNode && targetIndex >= 0) {
-            const beforeText = targetNode.textContent?.slice(0, targetIndex) || '';
-            const afterText = targetNode.textContent?.slice(targetIndex + rewrite.original_text.length) || '';
-            
-            // Create the replacement span
-            const span = document.createElement('span');
-            span.className = 'genshred-rewritten';
-            span.setAttribute('data-original-text', rewrite.original_text);
-            span.textContent = rewrite.rewritten_text;
-            
-            // Replace the text node with our three new nodes
-            const fragment = document.createDocumentFragment();
-            if (beforeText) fragment.appendChild(document.createTextNode(beforeText));
-            fragment.appendChild(span);
-            if (afterText) fragment.appendChild(document.createTextNode(afterText));
-            
-            targetNode.parentNode?.replaceChild(fragment, targetNode);
-        }
+    if (!rewrites || rewrites.length === 0) {
+        element.classList.add('genshred-processed');
+        return; // Nothing to rewrite, just mark as processed
     }
-    
-    // Update the original element
-    element.innerHTML = temp.innerHTML;
-    
-    // Add event listeners
-    element.querySelectorAll('.genshred-rewritten').forEach(span => {
-        if (!span.hasAttribute('data-listeners-added')) {
-            span.addEventListener('mouseover', (e) => {
-                const originalText = span.getAttribute('data-original-text');
-                if (originalText) {
-                    showTooltip(originalText, e as MouseEvent, span);
-                }
-            });
-            
-            span.addEventListener('mouseout', () => {
-                hideTooltip();
-            });
-            
-            span.setAttribute('data-listeners-added', 'true');
+
+    // Create a map for quick lookup of rewritten sentences by their original_index
+    const rewritesMap = new Map<number, string>();
+    rewrites.forEach(rewrite => {
+        rewritesMap.set(rewrite.original_index, rewrite.rewritten_text);
+    });
+
+    let newHtmlContent = '';
+    const tempContainer = document.createElement('div'); // Use a temp div to build DOM fragments
+
+    // Iterate through all original sentences of the paragraph
+    allOriginalSentences.forEach((sentence, index) => {
+        const rewrittenText = rewritesMap.get(index);
+
+        if (rewrittenText) {
+            // If a rewritten version exists, create the container span
+            const containerSpan = document.createElement('span');
+            containerSpan.className = 'genshred-rewrite-container';
+            containerSpan.setAttribute('data-original-text', sentence); // Store the full original sentence
+
+            const rewrittenSpan = document.createElement('span');
+            rewrittenSpan.className = 'genshred-rewritten';
+            rewrittenSpan.textContent = rewrittenText;
+
+            const originalSpan = document.createElement('span');
+            originalSpan.className = 'genshred-original-hidden'; // Hidden by default
+            originalSpan.textContent = sentence;
+
+            containerSpan.appendChild(rewrittenSpan);
+            containerSpan.appendChild(originalSpan);
+
+            // Append the outerHTML of the constructed span to our newHtmlContent
+            newHtmlContent += containerSpan.outerHTML;
+
+        } else {
+            // If no rewritten version, append the original sentence text directly
+            newHtmlContent += escapeHTML(sentence);
+        }
+
+        // Add a space after each sentence to ensure separation, but handle end of paragraph
+        if (index < allOriginalSentences.length - 1 && sentence.trim().length > 0) {
+            newHtmlContent += ' ';
         }
     });
+
+    // Replace the entire innerHTML of the element with the newly constructed HTML
+    element.innerHTML = newHtmlContent;
+
+    // Add event listeners to the newly created .genshred-rewrite-container elements
+    element.querySelectorAll('.genshred-rewrite-container').forEach(container => {
+        if (!container.hasAttribute('data-listeners-added')) {
+            const originalText = container.getAttribute('data-original-text');
+            const rewrittenSpan = container.querySelector('.genshred-rewritten') as HTMLElement;
+            const originalSpan = container.querySelector('.genshred-original-hidden') as HTMLElement;
+
+            if (originalText && rewrittenSpan && originalSpan) {
+                // Mouseover for tooltip
+                container.addEventListener('mouseover', (e) => {
+                    showTooltip(originalText, e as MouseEvent, container);
+                });
+
+                // Mouseout for tooltip
+                container.addEventListener('mouseout', () => {
+                    hideTooltip();
+                });
+
+                // Click listener to toggle between original and rewritten
+                container.addEventListener('click', (e) => {
+                    e.stopPropagation(); // Prevent parent clicks from interfering
+                    if (rewrittenSpan.style.display !== 'none') {
+                        rewrittenSpan.style.display = 'none';
+                        originalSpan.style.display = 'inline';
+                    } else {
+                        rewrittenSpan.style.display = 'inline';
+                        originalSpan.style.display = 'none';
+                    }
+                });
+            }
+            container.setAttribute('data-listeners-added', 'true');
+        }
+    });
+
+    // Mark the element as processed
+    element.classList.add('genshred-processed');
+    element.classList.remove('genshred-processing'); // Ensure processing class is removed
 }
 
 // Helper function to replace text in element
@@ -1056,52 +1040,6 @@ function processWithInnerHTML(element: Element, sentences: string[], rewritesMap
     });
 }
 
-// 更健壮的句子分割方法 - 现在会调用后端API
-// async function splitTextIntoSentences(text: string): Promise<string[]> {
-//     try {
-//         const backendUrl = `${SERVER_URL}/split_sentences`;
-//         const response = await fetch(backendUrl, {
-//             method: 'POST',
-//             headers: {
-//                 'Content-Type': 'application/json',
-//             },
-//             body: JSON.stringify({ text }),
-//             signal: AbortSignal.timeout(9000) // 9秒超时
-//         });
-
-//         if (!response.ok) {
-//             console.error('Sentence splitting API failed:', response.statusText);
-//             throw new Error(`API request failed with status ${response.status}`);
-//         }
-
-//         const data = await response.json();
-//         if (data && Array.isArray(data.sentences)) {
-//             console.log("Sentences successfully split by backend API.");
-//             return data.sentences.filter(s => s.length > 0 && /[a-zA-Z]/.test(s));
-//         } else {
-//             console.error('Invalid response from sentence splitting API:', data);
-//             throw new Error('Invalid API response format');
-//         }
-//     } catch (error) {
-//         console.warn('Backend sentence splitting failed, falling back to local regex-based method.', error);
-        
-//         // --- Fallback to original regex-based method ---
-//         const cleanText = text
-//             .replace(/<[^>]+>/g, ' ')  // Remove HTML tags
-//             .replace(/\s+/g, ' ')      // Normalize whitespace
-//             .trim();
-
-//         const sentences = cleanText.match(/[^.!?]+[.!?]+/g) || [cleanText]; // Fallback to whole text if no sentences found
-        
-//         return sentences
-//             .map(s => s.trim())
-//             .filter(s => {
-//                 return s.length >= 10 && // Minimum length
-//                        /[a-zA-Z]/.test(s) && // Contains letters
-//                        !/^[^a-zA-Z]*$/.test(s); // Not just symbols
-//             });
-//     }
-// }
 
 // Restore original text logic (updated for data-original-text)
 function restoreOriginalText() {
