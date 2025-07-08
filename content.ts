@@ -21,8 +21,8 @@ const observedElements = new WeakSet<Element>();
 
 async function processElement(element: HTMLElement) {
     try {
-            if (!currentSettings[STORAGE_KEYS.IS_ON] ||
-            element.classList.contains('genshred-processed') ||
+        if (!currentSettings[STORAGE_KEYS.IS_ON] || 
+            element.classList.contains('genshred-processed') || 
             element.classList.contains('genshred-processing') ||
             element.closest('.genshred-rewrite-container') || // Skip if part of a rewritten block
             element.closest('.genshred-tooltip-container')) { // Skip if part of the tooltip
@@ -31,14 +31,18 @@ async function processElement(element: HTMLElement) {
         }
 
 
-        const textBlock = element.innerText.trim();
-        
-        console.log("Processing text block:", textBlock.substring(0, 50) + "...");
-
+        const { fullText: textBlock, mappings: textNodeMappings } = getTextNodesWithOffsets(element);
+        // Check for minimum and maximum paragraph length early
         if (textBlock.length < MIN_PARAGRAPH_LENGTH) {
-            console.log("Text block too short, skipping");
+            console.log(`Text block too short (${textBlock.length} chars), skipping. Min: ${MIN_PARAGRAPH_LENGTH}`);
             return;
         }
+        if (textBlock.length > MAX_PARAGRAPH_LENGTH) {
+            console.log(`Text block too long (${textBlock.length} chars), skipping. Max: ${MAX_PARAGRAPH_LENGTH}`);
+            return;
+        }
+        
+        console.log("Processing text block:", textBlock.substring(0, 50) + "...");
 
         // Mark as processing to prevent duplicate processing
         element.classList.add('genshred-processing');
@@ -108,6 +112,30 @@ async function processElement(element: HTMLElement) {
         }> = [];
 
         for (const { sentence, index, startIndex } of selectedSentences) {
+                        // NEW: Check if this sentence spans multiple text nodes in the original DOM structure
+            let startNode: Text | null = null;
+            let endNode: Text | null = null;
+            let currentGlobalOffset = 0;
+            const originalTextGlobalEnd = startIndex + sentence.length;
+
+            for (const mapping of textNodeMappings) {
+                const nodeLength = (mapping.node.textContent || '').length;
+
+                if (startNode === null && startIndex >= currentGlobalOffset && startIndex < currentGlobalOffset + nodeLength) {
+                    startNode = mapping.node;
+                }
+
+                if (endNode === null && originalTextGlobalEnd > currentGlobalOffset && originalTextGlobalEnd <= currentGlobalOffset + nodeLength) {
+                    endNode = mapping.node;
+                    break;
+                }
+                currentGlobalOffset += nodeLength;
+            }
+
+            if (startNode && endNode && startNode !== endNode) {
+                console.warn(`Pre-emptively skipping sentence for rewriting (spans multiple text nodes): "${sentence.substring(0, Math.min(sentence.length, 50))}..."`);
+                continue; // Skip this sentence, don't send it for rewriting
+            }
             const result = await new Promise<ProcessResponse>((resolve) => {
                 // Determine which prompt to use based on difficulty level
                 // let promptToUse = selectedDifficulty === "Custom_1" 
@@ -143,7 +171,7 @@ async function processElement(element: HTMLElement) {
 
 
         if (processedSentences.length > 0) {
-            applyRewritesToElement(element, processedSentences, sentences); // Pass all original sentences
+            applyRewritesToElement(element, processedSentences, sentences); // Pass all original sentences and mappings
             element.classList.add('genshred-processed');
         }
     } catch (error) {
@@ -578,7 +606,7 @@ async function processParagraphs() {
     // Select all potential text elements
     const textElements = Array.from(document.querySelectorAll("p, div, span, h1, h2, h3, h4, h5, h6, li, td, th"))
         .filter(element => {
-            return element instanceof HTMLElement &&
+            return element instanceof HTMLElement && 
                 !element.classList.contains('genshred-processed') &&
                 !element.classList.contains('genshred-processing') &&
                 !element.closest('.genshred-rewrite-container') && // Skip if part of a rewritten block
@@ -637,19 +665,53 @@ function isElementVisible(element: Element): boolean {
            element.getBoundingClientRect().height > 0;
 }
 
+// Helper function to get all text nodes within an element and map their character offsets
+function getTextNodesWithOffsets(element: HTMLElement): { fullText: string, mappings: Array<{ node: Text, start: number, end: number }> } {
+    const fullText: string[] = [];
+    const mappings: Array<{ node: Text, start: number, end: number }> = [];
+    let currentOffset = 0;
+
+    const walker = document.createTreeWalker(
+        element,
+        NodeFilter.SHOW_TEXT,
+        null
+    );
+
+    let currentNode: Text | null;
+    while ((currentNode = walker.nextNode() as Text) !== null) {
+        const textContent = currentNode.textContent || '';
+        if (textContent.trim().length === 0) continue; // Skip empty or whitespace-only text nodes
+
+        fullText.push(textContent);
+        mappings.push({
+            node: currentNode,
+            start: currentOffset,
+            end: currentOffset + textContent.length
+        });
+        currentOffset += textContent.length;
+    }
+
+    return {
+        fullText: fullText.join(''), // Join all text content to form the continuous plain text
+        mappings: mappings
+    };
+}
+
+// 最后的回退方法：使用innerHTML替换
 function applyRewritesToElement(
-    element: Element,
+    element: HTMLElement,
     rewrites: Array<{
         original_text: string;
         rewritten_text: string;
         original_index: number;
         start_position: number;
     }>,
-    allOriginalSentences: string[] // NEW: Added allOriginalSentences parameter
+    allOriginalSentences: string[]
 ) {
     if (!rewrites || rewrites.length === 0) {
         element.classList.add('genshred-processed');
-        return; // Nothing to rewrite, just mark as processed
+        element.classList.remove('genshred-processing');
+        return; // Nothing to rewrite
     }
 
     // Create a map for quick lookup of rewritten sentences by their original_index
@@ -658,48 +720,108 @@ function applyRewritesToElement(
         rewritesMap.set(rewrite.original_index, rewrite.rewritten_text);
     });
 
-    let newHtmlContent = '';
-    const tempContainer = document.createElement('div'); // Use a temp div to build DOM fragments
+    // Create a deep clone of the element to perform modifications without disrupting the live DOM
+    const clonedElement = element.cloneNode(true) as HTMLElement;
 
-    // Iterate through all original sentences of the paragraph
-    allOriginalSentences.forEach((sentence, index) => {
-        const rewrittenText = rewritesMap.get(index);
+    // Get text nodes and their offsets from the CLONED element
+    const { fullText: clonedFullText, mappings: clonedTextNodeMappings } = getTextNodesWithOffsets(clonedElement);
 
-        if (rewrittenText) {
-            // If a rewritten version exists, create the container span
-            const containerSpan = document.createElement('span');
-            containerSpan.className = 'genshred-rewrite-container';
-            containerSpan.setAttribute('data-original-text', sentence); // Store the full original sentence
+    // Filter rewrites to only include those that are actually present in the clonedFullText
+    // and can be accurately located. This helps in cases where `innerText` changes slightly.
+    const validRewrites = rewrites.filter(rewrite => {
+        return clonedFullText.substring(rewrite.start_position, rewrite.start_position + rewrite.original_text.length) === rewrite.original_text;
+    });
 
-            const rewrittenSpan = document.createElement('span');
-            rewrittenSpan.className = 'genshred-rewritten';
-            rewrittenSpan.textContent = rewrittenText;
+    // Sort valid rewrites by their start_position in descending order
+    // This is crucial for safely modifying text content from end to beginning
+    // to avoid issues with shifted indices when manipulating DOM nodes.
+    const sortedRewrites = validRewrites.sort((a, b) => b.start_position - a.start_position);
 
-            const originalSpan = document.createElement('span');
-            originalSpan.className = 'genshred-original-hidden'; // Hidden by default
-            originalSpan.textContent = sentence;
+    sortedRewrites.forEach(rewrite => {
+        const originalText = rewrite.original_text;
+        const rewrittenText = rewrite.rewritten_text;
+        const originalTextGlobalStart = rewrite.start_position;
+        const originalTextGlobalEnd = originalTextGlobalStart + originalText.length;
+        const originalIndex = rewrite.original_index; // Index in allOriginalSentences
 
-            containerSpan.appendChild(rewrittenSpan);
-            containerSpan.appendChild(originalSpan);
+        // Get the full original sentence from the list provided by the splitter, for the tooltip
+        const fullOriginalSentenceForTooltip = allOriginalSentences[originalIndex] || originalText;
 
-            // Append the outerHTML of the constructed span to our newHtmlContent
-            newHtmlContent += containerSpan.outerHTML;
+        // Find the text node(s) corresponding to this original sentence in the CLONE
+        let startNode: Text | null = null;
+        let endNode: Text | null = null;
+        let startOffsetInNode = -1;
+        let endOffsetInNode = -1;
 
-        } else {
-            // If no rewritten version, append the original sentence text directly
-            newHtmlContent += escapeHTML(sentence);
+        let currentGlobalOffset = 0;
+        for (const mapping of clonedTextNodeMappings) {
+            const node = mapping.node;
+            const nodeText = node.textContent || '';
+        const nodeLength = nodeText.length;
+        
+            if (startNode === null && originalTextGlobalStart >= currentGlobalOffset && originalTextGlobalStart < currentGlobalOffset + nodeLength) {
+                startNode = node;
+                startOffsetInNode = originalTextGlobalStart - currentGlobalOffset;
+            }
+
+            if (endNode === null && originalTextGlobalEnd > currentGlobalOffset && originalTextGlobalEnd <= currentGlobalOffset + nodeLength) {
+                endNode = node;
+                endOffsetInNode = originalTextGlobalEnd - currentGlobalOffset;
+                break; // Found the end node, can stop searching
+            }
+            // If the sentence spans across current node
+            if (startNode !== null && endNode === null && originalTextGlobalEnd > currentGlobalOffset + nodeLength) {
+                // Continue to next node to find end
+            }
+            currentGlobalOffset += nodeLength;
         }
 
-        // Add a space after each sentence to ensure separation, but handle end of paragraph
-        if (index < allOriginalSentences.length - 1 && sentence.trim().length > 0) {
-            newHtmlContent += ' ';
+        if (startNode && endNode) {
+            const parent = startNode.parentNode;
+            if (!parent) return;
+
+            // Handle sentences completely within one text node
+            if (startNode === endNode) {
+                const textBefore = startNode.textContent?.substring(0, startOffsetInNode) || '';
+                const textAfter = startNode.textContent?.substring(endOffsetInNode) || '';
+
+                const containerSpan = document.createElement('span');
+                containerSpan.className = 'genshred-rewrite-container';
+                containerSpan.setAttribute('data-original-text', escapeHTML(fullOriginalSentenceForTooltip));
+
+                const rewrittenSpan = document.createElement('span');
+                rewrittenSpan.className = 'genshred-rewritten';
+                rewrittenSpan.textContent = rewrittenText;
+
+                const originalSpan = document.createElement('span');
+                originalSpan.className = 'genshred-original-hidden';
+                originalSpan.textContent = fullOriginalSentenceForTooltip;
+
+                containerSpan.appendChild(rewrittenSpan);
+                containerSpan.appendChild(originalSpan);
+
+                const fragment = document.createDocumentFragment();
+                if (textBefore) fragment.appendChild(document.createTextNode(textBefore));
+                fragment.appendChild(containerSpan);
+                if (textAfter) fragment.appendChild(document.createTextNode(textAfter));
+
+                parent.replaceChild(fragment, startNode);
+
+            } else {
+                // Handle sentences spanning multiple text nodes (more complex)
+                // This is a common pain point for DOM manipulation.
+                // Simplification: For now, if a sentence spans multiple nodes, we'll skip rewriting it
+                // to avoid complex DOM fragmentation issues. These sentences will remain original.
+                // A more advanced solution would use the Range API or recursive node splitting.
+                console.warn(`Skipping rewrite for sentence "${originalText.substring(0, 50)}..." because it spans multiple text nodes. Complex HTML structure may prevent accurate replacement.`);
+            }
         }
     });
 
-    // Replace the entire innerHTML of the element with the newly constructed HTML
-    element.innerHTML = newHtmlContent;
+    // Finally, update the original element's innerHTML with the modified cloned content
+    element.innerHTML = clonedElement.innerHTML;
 
-    // Add event listeners to the newly created .genshred-rewrite-container elements
+    // Re-attach event listeners to the newly created .genshred-rewrite-container elements
     element.querySelectorAll('.genshred-rewrite-container').forEach(container => {
         if (!container.hasAttribute('data-listeners-added')) {
             const originalText = container.getAttribute('data-original-text');
@@ -714,9 +836,9 @@ function applyRewritesToElement(
 
                 // Mouseout for tooltip
                 container.addEventListener('mouseout', () => {
-                    hideTooltip();
-                });
-
+            hideTooltip();
+        });
+        
                 // Click listener to toggle between original and rewritten
                 container.addEventListener('click', (e) => {
                     e.stopPropagation(); // Prevent parent clicks from interfering
@@ -733,314 +855,10 @@ function applyRewritesToElement(
         }
     });
 
-    // Mark the element as processed
+    // Mark the original element as processed
     element.classList.add('genshred-processed');
-    element.classList.remove('genshred-processing'); // Ensure processing class is removed
+    element.classList.remove('genshred-processing');
 }
-
-// Helper function to replace text in element
-function replaceTextInElement(element: Element, searchText: string, replacement: Node) {
-    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
-    let node: Text | null;
-    
-    while (node = walker.nextNode() as Text) {
-        const index = node.textContent?.indexOf(searchText) ?? -1;
-        if (index >= 0) {
-            const before = node.textContent?.slice(0, index) ?? '';
-            const after = node.textContent?.slice(index + searchText.length) ?? '';
-            
-            const fragment = document.createDocumentFragment();
-            if (before) fragment.appendChild(document.createTextNode(before));
-            fragment.appendChild(replacement);
-            if (after) fragment.appendChild(document.createTextNode(after));
-            
-            node.parentNode?.replaceChild(fragment, node);
-            break;
-        }
-    }
-}
-// 使用Range API精确定位和替换文本
-function processTextNodesWithRanges(element: Element, sentences: string[], rewritesMap: Map<number, string>) {
-    // 创建一个文档范围
-    const range = document.createRange();
-    const elementText = element.textContent || "";
-    
-    // 对每个句子进行处理，从后往前处理以避免位置偏移问题
-    for (let i = sentences.length - 1; i >= 0; i--) {
-        const sentence = sentences[i];
-        const rewrittenText = rewritesMap.get(i);
-        
-        if (!rewrittenText) continue; // 跳过没有改写的句子
-        
-        // 查找句子在元素文本中的位置
-        const sentenceIndex = elementText.indexOf(sentence);
-        if (sentenceIndex === -1) continue;
-        
-        // 设置范围以包含整个句子
-        try {
-            // 使用文本节点查找器定位句子的开始和结束
-            const sentenceRange = findRangeForText(element, sentence, sentenceIndex);
-            if (!sentenceRange) continue;
-
-            // 创建替换元素
-            const span = document.createElement("span");
-            span.textContent = rewrittenText;
-            span.classList.add('genshred-rewritten');
-            span.setAttribute("data-original-text", sentence);
-            
-            // 添加鼠标事件监听器，使用全局提示框
-            span.addEventListener('mouseover', (e) => {
-                showTooltip(sentence, e as MouseEvent, span);
-            });
-            
-            span.addEventListener('mouseout', () => {
-                hideTooltip();
-            });
-            
-            // 删除范围内容并插入新元素
-            sentenceRange.deleteContents();
-            sentenceRange.insertNode(span);
-        } catch (e) {
-            console.warn(`Failed to create range for sentence: "${sentence.substring(0, 20)}..."`, e);
-            throw e; // 重新抛出异常以触发回退方法
-        }
-    }
-}
-
-// 辅助函数：为文本查找Range
-function findRangeForText(rootElement: Element, text: string, approximateIndex: number): Range | null {
-    // 创建一个文本节点遍历器
-    const walker = document.createTreeWalker(
-        rootElement,
-        NodeFilter.SHOW_TEXT,
-        null
-    );
-
-    let currentNode: Text | null = walker.nextNode() as Text;
-    let currentOffset = 0;
-    
-    // 遍历所有文本节点
-    while (currentNode) {
-        const nodeText = currentNode.textContent || "";
-        const nodeLength = nodeText.length;
-        
-        // 如果近似索引在当前节点范围内
-        if (approximateIndex >= currentOffset && approximateIndex < currentOffset + nodeLength) {
-            // 在节点内查找确切文本
-            const nodeTextIndex = nodeText.indexOf(text);
-            
-            if (nodeTextIndex !== -1) {
-                // 创建一个范围
-                const range = document.createRange();
-                range.setStart(currentNode, nodeTextIndex);
-                range.setEnd(currentNode, nodeTextIndex + text.length);
-                return range;
-            }
-        }
-        
-        // 如果文本跨越多个节点
-        if (approximateIndex <= currentOffset + nodeLength) {
-            // 尝试查找文本的开头部分
-            for (let i = 0; i < nodeLength; i++) {
-                const potentialStart = nodeText.substring(i);
-                if (text.startsWith(potentialStart)) {
-                    // 找到了开头部分，现在寻找剩余部分
-                    const remainingText = text.substring(potentialStart.length);
-                    const startRange = document.createRange();
-                    startRange.setStart(currentNode, i);
-                    startRange.setEnd(currentNode, nodeLength);
-                    
-                    // 继续在后续节点中查找
-                    let nextNode = walker.nextNode() as Text;
-                    let collectedText = potentialStart;
-                    
-                    while (nextNode && collectedText.length < text.length) {
-                        const nextNodeText = nextNode.textContent || "";
-                        collectedText += nextNodeText;
-                        
-                        if (collectedText.length >= text.length) {
-                            // 找到了完整文本
-                            const endRange = document.createRange();
-                            endRange.setStart(currentNode, i);
-                            endRange.setEnd(nextNode, text.length - potentialStart.length);
-                            return endRange;
-                        }
-                        
-                        nextNode = walker.nextNode() as Text;
-                    }
-                }
-            }
-        }
-        
-        currentOffset += nodeLength;
-        currentNode = walker.nextNode() as Text;
-    }
-    
-    return null;
-}
-
-// 使用TreeWalker处理文本节点
-function processTextNodesWithTreeWalker(element: Element, sentences: string[], rewritesMap: Map<number, string>) {
-    // 创建一个文本节点遍历器
-    const walker = document.createTreeWalker(
-        element,
-        NodeFilter.SHOW_TEXT,
-        null
-    );
-
-    // 收集所有文本节点
-    const textNodes: Text[] = [];
-    let cumulativeText = "";
-    
-    while (walker.nextNode()) {
-        const node = walker.currentNode as Text;
-        textNodes.push(node);
-        cumulativeText += node.textContent || "";
-    }
-
-    // 为每个句子找到对应的文本节点和位置
-    const nodesToReplace: { node: Text, start: number, end: number, originalText: string, rewrittenText: string }[] = [];
-    
-    sentences.forEach((sentence, sentenceIndex) => {
-        const rewrittenText = rewritesMap.get(sentenceIndex);
-        if (!rewrittenText) return; // 跳过没有改写的句子
-        
-        // 在累积文本中查找句子位置
-        const sentenceStart = cumulativeText.indexOf(sentence);
-        if (sentenceStart === -1) return;
-        
-        const sentenceEnd = sentenceStart + sentence.length;
-        
-        // 找到包含句子的节点
-    let currentOffset = 0;
-        let sentenceStartNode: Text | null = null;
-        let sentenceStartOffset = 0;
-        let sentenceEndNode: Text | null = null;
-        let sentenceEndOffset = 0;
-        
-        for (const node of textNodes) {
-            const nodeText = node.textContent || "";
-                 const nodeLength = nodeText.length;
-            const nodeEnd = currentOffset + nodeLength;
-            
-            // 检查句子是否开始于此节点
-            if (sentenceStart >= currentOffset && sentenceStart < nodeEnd) {
-                sentenceStartNode = node;
-                sentenceStartOffset = sentenceStart - currentOffset;
-            }
-            
-            // 检查句子是否结束于此节点
-            if (sentenceEnd > currentOffset && sentenceEnd <= nodeEnd) {
-                sentenceEndNode = node;
-                sentenceEndOffset = sentenceEnd - currentOffset;
-                break;
-            }
-            
-            currentOffset = nodeEnd;
-        }
-        
-        // 如果句子完全包含在一个节点内
-        if (sentenceStartNode && sentenceEndNode && sentenceStartNode === sentenceEndNode) {
-                         nodesToReplace.push({
-                node: sentenceStartNode,
-                start: sentenceStartOffset,
-                end: sentenceEndOffset,
-                originalText: sentence,
-                             rewrittenText: rewrittenText
-                         });
-        } else if (sentenceStartNode && sentenceEndNode) {
-            // 句子跨越多个节点，这种情况比较复杂
-            // 为简单起见，我们使用innerHTML替换整个句子
-            console.warn("Sentence spans multiple nodes, using innerHTML fallback for:", sentence);
-            throw new Error("Multi-node sentence requires innerHTML fallback");
-         }
-    });
-
-    // 对收集到的节点应用替换，从后往前处理以避免位置偏移问题
-    nodesToReplace.sort((a, b) => {
-        if (a.node === b.node) {
-            return b.start - a.start;
-        }
-        return b.node.compareDocumentPosition(a.node) & Node.DOCUMENT_POSITION_PRECEDING ? 1 : -1;
-    });
-
-    nodesToReplace.forEach(({ node, start, end, originalText, rewrittenText }) => {
-        const nodeText = node.textContent || "";
-        const before = nodeText.substring(0, start);
-        const after = nodeText.substring(end);
-        
-        // 创建文档片段
-        const fragment = document.createDocumentFragment();
-        
-        // 添加前部分文本
-        if (before) {
-            fragment.appendChild(document.createTextNode(before));
-        }
-        
-        // 添加改写的span元素
-    const span = document.createElement("span");
-    span.textContent = rewrittenText;
-    span.classList.add('genshred-rewritten');
-        span.setAttribute("data-original-text", originalText);
-        
-        // 添加鼠标事件监听器，使用全局提示框
-        span.addEventListener('mouseover', (e) => {
-            showTooltip(originalText, e as MouseEvent, span);
-        });
-        
-        span.addEventListener('mouseout', () => {
-            hideTooltip();
-        });
-        
-        fragment.appendChild(span);
-        
-        // 添加后部分文本
-        if (after) {
-            fragment.appendChild(document.createTextNode(after));
-        }
-        
-        // 替换原始节点
-        node.parentNode?.replaceChild(fragment, node);
-});
-}
-
-// 最后的回退方法：使用innerHTML替换
-function processWithInnerHTML(element: Element, sentences: string[], rewritesMap: Map<number, string>) {
-    let html = element.innerHTML;
-    
-    // 从最长的句子开始处理，以避免部分匹配问题
-    const sentencesWithIndex = sentences.map((sentence, index) => ({ sentence, index }));
-    sentencesWithIndex.sort((a, b) => b.sentence.length - a.sentence.length);
-    
-    for (const { sentence, index } of sentencesWithIndex) {
-        const rewrittenText = rewritesMap.get(index);
-        if (!rewrittenText) continue;
-        
-        // 转义特殊字符
-        const escapedSentence = escapeRegExp(escapeHTML(sentence));
-        const escapedRewritten = escapeHTML(rewrittenText);
-        
-        // 创建替换HTML
-        const replacement = `<span class="genshred-rewritten" data-original-text="${escapeHTML(sentence)}" onmouseover="(function(e){window.dispatchEvent(new CustomEvent('genshred-tooltip-show', {detail:{text:'${escapeHTML(sentence)}',event:e,element:this}}));})(event)" onmouseout="window.dispatchEvent(new CustomEvent('genshred-tooltip-hide'))">${escapedRewritten}</span>`;
-
-        // 替换HTML中的句子
-        html = html.replace(new RegExp(escapedSentence, 'g'), replacement);
-    }
-    
-    element.innerHTML = html;
-    
-    // 为innerHTML方法添加的元素绑定事件
-    document.addEventListener('genshred-tooltip-show', (e: Event) => {
-        const detail = (e as CustomEvent).detail;
-        showTooltip(detail.text, detail.event, detail.element);
-    });
-    
-    document.addEventListener('genshred-tooltip-hide', () => {
-        hideTooltip();
-    });
-}
-
-
 // Restore original text logic (updated for data-original-text)
 function restoreOriginalText() {
   // 隐藏提示框
