@@ -11,7 +11,7 @@ interface ProcessResponse {
     }>;
 }
 const PROCESSING_DELAY = 1000; // 1 second delay between processing requests
-const PARAGRAPH_CACHE = new Map<string, any>(); // Cache for processed paragraphs not yet effective 未实装
+// const PARAGRAPH_CACHE = new Map<string, any>(); // Cache for processed paragraphs not yet effective 未实装
 const MIN_PARAGRAPH_LENGTH = 100; // Minimum characters to process
 const MAX_PARAGRAPH_LENGTH = 5000; // Maximum characters to process
 // lazyloading
@@ -54,16 +54,20 @@ async function processElement(element: HTMLElement) {
         console.log("Using difficulty:", selectedDifficulty);
         console.log("Using prompt instruction:", effectivePromptInstruction);
 
-        const cacheKey = `${textBlock}_${effectivePromptInstruction}_${effectiveCustomPromptTemplate}_${currentSettings[STORAGE_KEYS.SENTENCE_COUNT]}`;
+        // Create a unique hash for the cache key to handle long text blocks
+        const textHash = await sha256(textBlock);
+        const cacheKey = `genshred_cache_${textHash}_${selectedDifficulty}_${effectiveCustomPromptTemplate || 'no_custom_prompt'}_${currentSettings[STORAGE_KEYS.SENTENCE_COUNT]}`;
 
-        if (PARAGRAPH_CACHE.has(cacheKey)) {
-            // console.log("Using cached response");
-            // const cachedResponse = PARAGRAPH_CACHE.get(cacheKey);
-            // await applyRewritesToElement(element, cachedResponse.rewritten_sentences,sentences);
-            // element.classList.add('genshred-processed');
-            // element.classList.remove('genshred-processing');
+        const cachedData = await chrome.storage.local.get(cacheKey);
+
+        if (cachedData[cacheKey]) {
+            console.log("Using cached response from chrome.storage.local for element:", textBlock.substring(0, 50) + "...");
+            const { processedSentences, allOriginalSentences } = cachedData[cacheKey];
+            applyRewritesToElement(element, processedSentences, allOriginalSentences);
+            element.classList.add('genshred-processed');
+            element.classList.remove('genshred-processing');
             return;
-        }// This is to fix later
+        }
 
         // Process text in chunks
         
@@ -85,9 +89,14 @@ async function processElement(element: HTMLElement) {
             startIndex: textBlock.indexOf(sentence), // Track original position
             complexity: calculateComplexityScore(sentence)
         }));
+
+        // Calculate number of sentences to rewrite based on percentage
+        const percentageToRewrite = Number(currentSettings[STORAGE_KEYS.SENTENCE_COUNT]); // This is now a percentage (0-100)
+        const numSentencesToRewrite = Math.round(sentences.length * (percentageToRewrite / 100));
+
         const selectedSentences = selectSentences(
             sentencesWithOriginalData,
-            Number(currentSettings[STORAGE_KEYS.SENTENCE_COUNT])
+            numSentencesToRewrite
         );
         // // Calculate complexity scores
         //  const sentencesWithScores = sentences.map((sentence, index) => ({
@@ -171,6 +180,9 @@ async function processElement(element: HTMLElement) {
 
 
         if (processedSentences.length > 0) {
+            // Store the processed sentences and all original sentences in cache
+            console.log("Storing processed sentences in chrome.storage.local for cacheKey:", cacheKey);
+            await chrome.storage.local.set({ [cacheKey]: { processedSentences, allOriginalSentences: sentences } });
             applyRewritesToElement(element, processedSentences, sentences); // Pass all original sentences and mappings
             element.classList.add('genshred-processed');
         }
@@ -203,7 +215,7 @@ const STORAGE_KEYS = {
 // const CUSTOM_PROMPT_DEFAULT = "Rewrite the following sentence(s) for a user with language level {user_level}. Simplify vocabulary and sentence structure if necessary, while retaining the original meaning:\n\n{sentences_to_rewrite}";
 const DEFAULT_SETTINGS = {
   [STORAGE_KEYS.IS_ON]: true,
-  [STORAGE_KEYS.SENTENCE_COUNT]: 5,
+  [STORAGE_KEYS.SENTENCE_COUNT]: 50, // Default to 50% of sentences
   [STORAGE_KEYS.DIFFICULTY_LEVEL]: 'Normal',
 //   [STORAGE_KEYS.CUSTOM_PROMPT]: CUSTOM_PROMPT_DEFAULT // Use the consistent default
 };
@@ -448,7 +460,7 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
         if (settingsChanged && currentSettings[STORAGE_KEYS.IS_ON]) {
             console.log("Settings changed, reprocessing paragraphs...");
             // Clear cache to ensure new settings are applied
-            PARAGRAPH_CACHE.clear();
+            // PARAGRAPH_CACHE.clear(); // This line is removed as per the new_code
             // First restore original text, then process with new settings
             restoreOriginalText();
             processParagraphs();
@@ -905,14 +917,38 @@ chrome.runtime.onMessage.addListener((message, _sender, _sendResponse) => {
 
     // NEW: Handle CLEAR_CACHE message (as discussed previously)
     if (message.type === "CLEAR_CACHE") {
-        console.log("Content script received CLEAR_CACHE message. Clearing cache.");
-        PARAGRAPH_CACHE.clear(); // Clear the cache
-        restoreOriginalText(); // Revert any changes on the page
-        if (currentSettings[STORAGE_KEYS.IS_ON]) {
-            processParagraphs(); // Re-process the page with current settings
-        }
+        console.log("Content script received CLEAR_CACHE message. Clearing chrome.storage.local cache.");
+        // Clear all items that start with 'genshred_cache_' prefix
+        chrome.storage.local.get(null, (items) => {
+            const keysToRemove = Object.keys(items).filter(key => key.startsWith('genshred_cache_'));
+            if (keysToRemove.length > 0) {
+                chrome.storage.local.remove(keysToRemove, () => {
+                    console.log(`Removed ${keysToRemove.length} items from cache.`);
+                    restoreOriginalText(); // Revert any changes on the page
+                    if (currentSettings[STORAGE_KEYS.IS_ON]) {
+                        processParagraphs(); // Re-process the page with current settings
+                    }
+                });
+            } else {
+                console.log("No cache items found to remove.");
+                restoreOriginalText();
+                if (currentSettings[STORAGE_KEYS.IS_ON]) {
+                    processParagraphs();
+                }
+            }
+        });
         return false; // No async response needed
     }
 
     return false;
 });
+
+// Helper function to generate SHA256 hash
+async function sha256(message: string): Promise<string> {
+    const textEncoder = new TextEncoder();
+    const data = textEncoder.encode(message);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const hexHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    return hexHash;
+}

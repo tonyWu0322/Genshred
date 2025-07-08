@@ -1,5 +1,5 @@
 // popup.tsx
-import React, { useState, useEffect } from 'react'; // Import useEffect
+import React, { useState, useEffect, useCallback } from 'react'; // Import useEffect and useCallback
 import './popup.css'; // 创建一个基础的 CSS 文件用于样式
 import PromptSettingsModal from './PromptSettingsModal'; // Import the modal component
 import UserModal from './UserModal'; // Import the user modal component
@@ -229,28 +229,31 @@ const handleClearCache = async () => {
       <section className="popup-body">
         <div className="control-group">
           <label htmlFor="on-off-toggle">On/ Off</label>
-          {/* 基础开关组件 - 可用 CSS 进一步美化 */}
-          <input
-            type="checkbox"
-            id="on-off-toggle"
-            checked={!!isOn} // Ensure boolean
-            onChange={handleToggle} // Use handler
-          />
+          {/* Switch Toggle Component */}
+          <label className="switch">
+            <input
+              type="checkbox"
+              id="on-off-toggle"
+              checked={!!isOn} // Ensure boolean
+              onChange={handleToggle} // Use handler
+            />
+            <span className="slider round"></span>
+          </label>
         </div>
 
         {/* "重写句子数量"滑块 */}
         <div className="control-group">
-          <label htmlFor="sentences-slider">No. of Sentences Rewritten</label>
+          <label htmlFor="sentences-slider">Percentage of Sentences to Rewrite</label>
           <input
             type="range"
             id="sentences-slider"
-            min="1" // 最小值示例
-            max="10" // 最大值示例 - 可根据需要调整
+            min="0" // Minimum percentage
+            max="100" // Maximum percentage
             value={Number(sentencesToRewrite)} // Ensure value is a number
             onChange={handleSliderChange} // Use handler
           />
           {/* 可选：显示当前滑块值 */}
-          <span>{Number(sentencesToRewrite)}</span> {/* Use state */}
+          <span>{Number(sentencesToRewrite)}%</span> {/* Use state and add percentage sign */}
         </div>
 
         {/* 难度选择 */}
@@ -268,29 +271,29 @@ const handleClearCache = async () => {
           {/* 从 Figma 获取的搜索和清除图标需要更复杂的组件实现 */}
         </div>
 
-        {/* 可在此添加未来新功能的控件分组 */}
+        {/* Clear Cache Button */}
+        <div className="control-group">
+          <button
+            className="clear-cache-button"
+            onClick={handleClearCache}
+          >
+            Clear Cache
+          </button>
+        </div>
 
       </section>
-       <div className="control-group">
-            <button 
-                className="clear-cache-button"
-                onClick={handleClearCache}
-            >
-                Clear Cache
-            </button>
-        </div>
-        
-        {/* User Modal */}
-        <UserModal 
-          isOpen={isUserModalOpen} 
-          onClose={() => setIsUserModalOpen(false)} 
-        />
-        
-        {/* Prompt Settings Modal */}
-        <PromptSettingsModal 
-          isOpen={isModalOpen} 
-          onClose={() => setIsModalOpen(false)} 
-        />
+
+      {/* User Modal */}
+      <UserModal
+        isOpen={isUserModalOpen}
+        onClose={() => setIsUserModalOpen(false)}
+      />
+
+      {/* Prompt Settings Modal */}
+      <PromptSettingsModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+      />
     </div>
   );
 }

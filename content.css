@@ -49,6 +49,11 @@
     display: none !important;
 }
 
+/* Hide original text until toggled */
+.genshred-original-hidden {
+    display: none;
+}
+
 /* Basic spinner */
 .genshred-loading-spinner {
     border: 3px solid #f3f3f3; /* Light grey */
