@@ -567,134 +567,7 @@ function setupIntersectionObserver() {
     // Add new scroll listener
     window.addEventListener('scroll', handleScroll, { passive: true });
 }
-// --- Function to process paragraphs and send to backend ---
-// async function processParagraphs() {
-//     if (!currentSettings[STORAGE_KEYS.IS_ON]) return;
 
-//     // 增加对更多元素类型的支持，不仅仅是段落
-//     const textElements = Array.from(document.querySelectorAll("p, div, span, h1, h2, h3, h4, h5, h6, li, td, th"));
-//     let lastProcessingTime = 0;
-
-//     for (const element of textElements) {
-//         // 跳过已经处理过的元素或不可见元素
-//         if (element.classList.contains('genshred-processed') || 
-//             element.closest('.genshred-rewritten') || 
-//             !isElementVisible(element)) {
-//             continue;
-//         }
-
-//         // 获取元素文本，处理不同类型的元素
-//         let textBlock = "";
-//         if (element instanceof HTMLElement) {
-//             textBlock = element.innerText.trim();
-//         } else {
-//             textBlock = (element.textContent || "").trim();
-//         }
-
-//         if (textBlock.length < MIN_PARAGRAPH_LENGTH) {
-//             // console.log("Skipping short paragraph:", textBlock.substring(0, 30) + "...");
-//             continue;
-//         }
-
-//         // NEW: Determine the actual prompt instruction and/or template to use for caching
-//         const selectedDifficulty = currentSettings[STORAGE_KEYS.DIFFICULTY_LEVEL] as string;
-//         let effectivePromptInstruction = currentDifficultyMappings[selectedDifficulty] || "";
-//         let effectiveCustomPromptTemplate = currentSettings[STORAGE_KEYS.CUSTOM_PROMPT];
-
-//         // If the selected difficulty is 'Custom_1', then the instruction is fixed, and the customPromptTemplate takes precedence
-//         if (selectedDifficulty === "Custom_1") {
-//             // In this case, `effectivePromptInstruction` is just a description, the real instruction is the template.
-//             // So we'll pass the template as the "instruction" for the cache key, but keep the instruction for the backend.
-//             effectivePromptInstruction = String(effectiveCustomPromptTemplate); // Use the actual template for cache key
-//         }
-        
-//         const cacheKey = `${textBlock}_${effectivePromptInstruction}_${effectiveCustomPromptTemplate}_${currentSettings[STORAGE_KEYS.SENTENCE_COUNT]}`;
-
-//         if (PARAGRAPH_CACHE.has(cacheKey)) {
-//             console.log("Using cached response for paragraph");
-//             const cachedResponse = PARAGRAPH_CACHE.get(cacheKey);
-//             applyRewritesToElement(element, cachedResponse.rewritten_sentences);
-            
-//             // 标记元素已处理
-//             element.classList.add('genshred-processed');
-//             continue;
-//         }
-
-//         const now = Date.now();
-//         if (now - lastProcessingTime < PROCESSING_DELAY) {
-//             await new Promise(resolve => setTimeout(resolve, PROCESSING_DELAY));
-//         }
-//         lastProcessingTime = now;
-
-//         console.log("Processing element:", textBlock.substring(0, 50) + "...");
-
-//         // Send to backend
-//         chrome.runtime.sendMessage(
-//             {
-//                 type: "PROCESS_TEXT_BLOCK",
-//                 textBlock: textBlock,
-//                 numSentences: currentSettings[STORAGE_KEYS.SENTENCE_COUNT],
-//                 // NEW: Pass the actual prompt instruction and the custom prompt template
-//                 promptInstruction: effectivePromptInstruction, // This is the mapped instruction
-//                 customPromptTemplate: effectiveCustomPromptTemplate, // This is the full template
-//                 // We still send difficultyLevel for tracking and backend logic,
-//                 // but the prompt itself will be constructed based on promptInstruction/customPromptTemplate
-//                 userLevel: selectedDifficulty // Keeping `userLevel` name for backend's API
-//             },
-//             (response) => {
-//                 if (!response?.error && response?.rewritten_sentences) {
-//                     PARAGRAPH_CACHE.set(cacheKey, response); // Cache with the new, more specific key
-//                     applyRewritesToElement(element, response.rewritten_sentences);
-                    
-//                     // 标记元素已处理
-//                     element.classList.add('genshred-processed');
-//                 }
-//                 console.log("Received response from background (backend):", response);
-
-//                 const rewrittenSentences = response?.rewritten_sentences;
-//                 const error = response?.error;
-
-//                 if (error) {
-//                     console.error("Backend processing failed:", error);
-//                     chrome.runtime.sendMessage({
-//                         type: "TRACK_EVENT",
-//                         eventType: "paragraph_processed_error",
-//                         eventData: {
-//                             paragraphLength: textBlock.length,
-//                             userLevel: currentSettings[STORAGE_KEYS.DIFFICULTY_LEVEL],
-//                             error: error
-//                         }
-//                     });
-//                     return;
-//                 }
-
-//                 if (rewrittenSentences && rewrittenSentences.length > 0) {
-//                     console.log("Applying rewrites to element.");
-
-//                     chrome.runtime.sendMessage({
-//                         type: "TRACK_EVENT",
-//                         eventType: "paragraph_processed_success",
-//                         eventData: {
-//                             paragraphLength: textBlock.length,
-//                             numSentencesRewritten: rewrittenSentences.length,
-//                             userLevel: currentSettings[STORAGE_KEYS.DIFFICULTY_LEVEL]
-//                         }
-//                     });
-//                 } else {
-//                     console.log("No rewritten sentences returned for this element.");
-//                     chrome.runtime.sendMessage({
-//                         type: "TRACK_EVENT",
-//                         eventType: "paragraph_processed_no_rewrite",
-//                         eventData: {
-//                             paragraphLength: textBlock.length,
-//                             userLevel: currentSettings[STORAGE_KEYS.DIFFICULTY_LEVEL]
-//                         }
-//                     });
-//                 }
-//             }
-//         );
-//     }
-// }
 async function processParagraphs() {
     if (!currentSettings[STORAGE_KEYS.IS_ON]) {
         console.log("Plugin is turned off");
@@ -705,11 +578,12 @@ async function processParagraphs() {
     // Select all potential text elements
     const textElements = Array.from(document.querySelectorAll("p, div, span, h1, h2, h3, h4, h5, h6, li, td, th"))
         .filter(element => {
-            return element instanceof HTMLElement && 
+            return element instanceof HTMLElement &&
                 !element.classList.contains('genshred-processed') &&
                 !element.classList.contains('genshred-processing') &&
-                !element.closest('.genshred-rewritten') &&
-                !observedElements.has(element) &&  // Add this check
+                !element.closest('.genshred-rewrite-container') && // Skip if part of a rewritten block
+                !element.closest('.genshred-tooltip-container') && // Skip if part of the tooltip
+                !observedElements.has(element) &&
                 element.textContent?.trim().length >= MIN_PARAGRAPH_LENGTH;
         });
 
