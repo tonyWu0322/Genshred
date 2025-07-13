@@ -11,15 +11,21 @@ const PromptSettingsModal: React.FC<PromptSettingsModalProps> = ({ isOpen, onClo
     "Easy": "Simplify vocabulary and sentence structure for a beginner (A2 CEFR level).",
     "Normal": "Rewrite for an intermediate English speaker (B2 CEFR level). Use clear and concise language.",
     "Hard": "Rewrite for an advanced English speaker (C1 CEFR level). Use sophisticated vocabulary while maintaining clarity.",
-    "Custom_1": "Rewrite for a user with specific needs, as defined by the custom prompt below."
   });
+  // NEW: State for custom prompts, allowing multiple and editable names
+  const [customPrompts, setCustomPrompts] = useState<Array<{ id: string; name: string; prompt: string }>>([]);
   const [statusMessage, setStatusMessage] = useState('');
+  const [newCustomPromptName, setNewCustomPromptName] = useState('');
 
   useEffect(() => {
     const loadSettings = async () => {
-      const storedSettings = await chrome.storage.local.get(['genShredDifficultyMapping']);
+      const storedSettings = await chrome.storage.local.get(['genShredDifficultyMapping', 'genShredCustomPrompts']);
       if (storedSettings['genShredDifficultyMapping']) {
-        setDifficultyMapping(storedSettings['genShredDifficultyMapping']);
+        // Only update non-custom mappings if they are different from current defaults
+        setDifficultyMapping(prev => ({ ...prev, ...storedSettings['genShredDifficultyMapping'] }));
+      }
+      if (storedSettings['genShredCustomPrompts']) {
+        setCustomPrompts(storedSettings['genShredCustomPrompts']);
       }
     };
     
@@ -29,12 +35,49 @@ const PromptSettingsModal: React.FC<PromptSettingsModalProps> = ({ isOpen, onClo
   }, [isOpen]);
 
   const handleMappingChange = (level: string, value: string) => {
+    // Handles changes for fixed difficulty prompts
     setDifficultyMapping(prev => ({ ...prev, [level]: value }));
+  };
+
+  const handleCustomPromptChange = (id: string, field: 'name' | 'prompt', value: string) => {
+    // Handles changes for custom prompts (name or prompt text)
+    setCustomPrompts(prev =>
+      prev.map(cp => (cp.id === id ? { ...cp, [field]: value } : cp))
+    );
+  };
+
+  const handleAddCustomPrompt = () => {
+    if (newCustomPromptName.trim() === '') {
+      setStatusMessage('Prompt name cannot be empty.');
+      setTimeout(() => setStatusMessage(''), 2000);
+      return;
+    }
+    if (customPrompts.some(cp => cp.name === newCustomPromptName.trim())) {
+        setStatusMessage('Prompt with this name already exists.');
+        setTimeout(() => setStatusMessage(''), 2000);
+        return;
+    }
+
+    const newId = `Custom_${Date.now()}`;
+    setCustomPrompts(prev => [
+      ...prev,
+      { id: newId, name: newCustomPromptName.trim(), prompt: "Rewrite for a user with specific needs. Use the following format: {sentences_to_rewrite}" }
+    ]);
+    setNewCustomPromptName(''); // Clear input field
+    setStatusMessage('Custom prompt added!');
+    setTimeout(() => setStatusMessage(''), 2000);
+  };
+
+  const handleDeleteCustomPrompt = (id: string) => {
+    setCustomPrompts(prev => prev.filter(cp => cp.id !== id));
+    setStatusMessage('Custom prompt deleted.');
+    setTimeout(() => setStatusMessage(''), 2000);
   };
 
   const handleSave = async () => {
     await chrome.storage.local.set({
-      'genShredDifficultyMapping': difficultyMapping
+      'genShredDifficultyMapping': difficultyMapping, // Save fixed mappings
+      'genShredCustomPrompts': customPrompts // Save custom prompts
     });
     setStatusMessage('Settings saved!');
     setTimeout(() => setStatusMessage(''), 2000);
@@ -45,12 +88,13 @@ const PromptSettingsModal: React.FC<PromptSettingsModalProps> = ({ isOpen, onClo
       "Easy": "Simplify vocabulary and sentence structure for a beginner (A2 CEFR level).",
       "Normal": "Rewrite for an intermediate English speaker (B2 CEFR level). Use clear and concise language.",
       "Hard": "Rewrite for an advanced English speaker (C1 CEFR level). Use sophisticated vocabulary while maintaining clarity.",
-      "Custom_1": "Rewrite for a user with specific needs, as defined by the custom prompt below."
     };
-    
     setDifficultyMapping(defaultMapping);
+    setCustomPrompts([]); // Clear custom prompts on reset
+
     await chrome.storage.local.set({
-      'genShredDifficultyMapping': defaultMapping
+      'genShredDifficultyMapping': defaultMapping,
+      'genShredCustomPrompts': []
     });
     setStatusMessage('Reset to defaults!');
     setTimeout(() => setStatusMessage(''), 2000);
@@ -69,16 +113,47 @@ const PromptSettingsModal: React.FC<PromptSettingsModalProps> = ({ isOpen, onClo
         <div className="modal-body">
           <p className="modal-description">
             Define what each difficulty level means for the AI when rewriting sentences.
+            Use `{`sentences_to_rewrite`}` as a placeholder for the sentences to be processed.
           </p>
           
           <div className="difficulty-settings">
-            {['Easy', 'Normal', 'Hard', 'Custom_1'].map((level) => (
+            {['Easy', 'Normal', 'Hard'].map((level) => (
               <div key={level} className="difficulty-setting">
                 <label htmlFor={`prompt-${level}`}>{level}:</label>
                 <textarea
                   id={`prompt-${level}`}
-                  value={difficultyMapping[level]}
+                  value={difficultyMapping[level as keyof typeof difficultyMapping]}
                   onChange={(e) => handleMappingChange(level, e.target.value)}
+                  rows={3}
+                />
+              </div>
+            ))}
+
+            <h3>Custom Prompts:</h3>
+            <div className="custom-prompt-add">
+                <input
+                    type="text"
+                    placeholder="New custom prompt name"
+                    value={newCustomPromptName}
+                    onChange={(e) => setNewCustomPromptName(e.target.value)}
+                />
+                <button onClick={handleAddCustomPrompt}>Add Prompt</button>
+            </div>
+
+            {customPrompts.map((cp) => (
+              <div key={cp.id} className="difficulty-setting custom-prompt-item">
+                <div className="custom-prompt-header">
+                    <input
+                        type="text"
+                        value={cp.name}
+                        onChange={(e) => handleCustomPromptChange(cp.id, 'name', e.target.value)}
+                        className="custom-prompt-name-input"
+                    />
+                    <button onClick={() => handleDeleteCustomPrompt(cp.id)} className="delete-button">×</button>
+                </div>
+                <textarea
+                  value={cp.prompt}
+                  onChange={(e) => handleCustomPromptChange(cp.id, 'prompt', e.target.value)}
                   rows={3}
                 />
               </div>

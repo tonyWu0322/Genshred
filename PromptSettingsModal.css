@@ -160,3 +160,151 @@
     opacity: 1;
   }
 } 
+
+/* The switch - the box around the slider */
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 45px; /* Increased width */
+  height: 25px; /* Increased height */
+}
+
+/* Hide default HTML checkbox */
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+/* The slider */
+.slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #ccc;
+  -webkit-transition: .4s;
+  transition: .4s;
+  border-radius: 25px; /* Adjust to match height for full roundness */
+}
+
+.slider:before {
+  position: absolute;
+  content: "";
+  height: 20px; /* Slightly smaller than slider height */
+  width: 20px; /* Slightly smaller than slider height */
+  left: 2px;
+  bottom: 2.5px;
+  background-color: white;
+  -webkit-transition: .4s;
+  transition: .4s;
+  border-radius: 50%;
+}
+
+input:checked + .slider {
+  background-color: #2196F3;
+}
+
+input:focus + .slider {
+  box-shadow: 0 0 1px #2196F3;
+}
+
+input:checked + .slider:before {
+  -webkit-transform: translateX(20px); /* Adjust based on new width */
+  -ms-transform: translateX(20px); /* Adjust based on new width */
+  transform: translateX(20px); /* Adjust based on new width */
+}
+
+/* Rounded sliders */
+.slider.round {
+  border-radius: 25px;
+}
+
+.slider.round:before {
+  border-radius: 50%;
+}
+
+/* Custom Prompts Styling */
+h3 {
+  font-size: 16px;
+  margin-top: 20px;
+  margin-bottom: 10px;
+  color: #333;
+}
+
+.custom-prompt-add {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.custom-prompt-add input {
+  flex-grow: 1;
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.custom-prompt-add button {
+  padding: 8px 16px;
+  background-color: #28a745; /* Green add button */
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.custom-prompt-add button:hover {
+  background-color: #218838;
+}
+
+.custom-prompt-item {
+  background-color: #f9f9f9;
+  border: 1px solid #eee;
+  border-radius: 6px;
+  padding: 15px;
+  margin-bottom: 15px;
+}
+
+.custom-prompt-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.custom-prompt-name-input {
+  flex-grow: 1;
+  font-weight: 600;
+  font-size: 15px;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background-color: transparent;
+  outline: none;
+  margin-right: 10px;
+}
+
+.custom-prompt-name-input:hover,
+.custom-prompt-name-input:focus {
+  border-color: #ddd;
+  background-color: white;
+}
+
+.delete-button {
+  background: none;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  color: #dc3545; /* Red for delete */
+  padding: 0;
+  line-height: 1;
+}
+
+.delete-button:hover {
+  color: #c82333;
+} 

@@ -20,18 +20,74 @@ const observedElements = new WeakSet<Element>();
 // Define keys for storage (should match popup.tsx)
 
 async function processElement(element: HTMLElement) {
+    console.log("Attempting to process element:", element.nodeName, element.textContent?.substring(0, 50) + "...");
     try {
-        if (!currentSettings[STORAGE_KEYS.IS_ON] || 
-            element.classList.contains('genshred-processed') || 
-            element.classList.contains('genshred-processing') ||
-            element.closest('.genshred-rewrite-container') || // Skip if part of a rewritten block
-            element.closest('.genshred-tooltip-container')) { // Skip if part of the tooltip
-            console.log("Skipping element - already processed, processing, or is a UI element.");
+        if (!currentSettings[STORAGE_KEYS.IS_ON]) {
+            console.log("Skipping element: Plugin is OFF.");
+            return;
+        }
+        if (element.classList.contains('genshred-processed')) {
+            console.log("Skipping element: Already processed.");
+            return;
+        }
+        if (element.classList.contains('genshred-processing')) {
+            console.log("Skipping element: Already processing.");
+            return;
+        }
+        if (element.closest('.genshred-rewrite-container')) {
+            console.log("Skipping element: Part of a rewritten block.");
+            return;
+        }
+        if (element.closest('.genshred-tooltip-container')) {
+            console.log("Skipping element: Part of the tooltip.");
             return;
         }
 
+        // Helper function to extract all text nodes and their offsets from an element
+        function getTextNodesWithOffsets(root: Node): { fullText: string, mappings: Array<{ node: Text, start: number, end: number }> } {
+            let fullText = "";
+            const mappings: Array<{ node: Text, start: number, end: number }> = [];
+            let currentOffset = 0;
+
+            function traverse(node: Node) {
+                if (node.nodeType === Node.TEXT_NODE) {
+                    const text = (node as Text).nodeValue || "";
+                    if (text.trim().length > 0) {
+                        const start = currentOffset;
+                        fullText += text;
+                        currentOffset += text.length;
+                        mappings.push({ node: node as Text, start, end: currentOffset });
+                    } else {
+                        // Even if whitespace, still increment offset for accurate mapping
+                        currentOffset += text.length;
+                    }
+                } else if (node.nodeType === Node.ELEMENT_NODE) {
+                   const element = node as HTMLElement;
+                   // Skip script, style, and hidden elements from text extraction
+                   if (element.tagName === 'SCRIPT' || 
+                       element.tagName === 'STYLE' || 
+                       element.tagName === 'NOSCRIPT' ||
+                       element.tagName === 'META' ||
+                       element.tagName === 'LINK' ||
+                       element.tagName === 'HEAD' ||
+                       element.tagName === 'IFRAME' || // Iframes handled separately but should be skipped for text content
+                       !isElementVisible(element)) { // Reuse your existing visibility check
+                       return; 
+                   }
+                    for (const child of Array.from(node.childNodes)) {
+                        traverse(child);
+                    }
+                }
+            }
+
+            traverse(root);
+            return { fullText, mappings };
+        }
 
         const { fullText: textBlock, mappings: textNodeMappings } = getTextNodesWithOffsets(element);
+        console.log("Extracted text block from element:", textBlock.substring(0, 200) + "...");
+        console.log("Text block length:", textBlock.length);
+
         // Check for minimum and maximum paragraph length early
         if (textBlock.length < MIN_PARAGRAPH_LENGTH) {
             console.log(`Text block too short (${textBlock.length} chars), skipping. Min: ${MIN_PARAGRAPH_LENGTH}`);
@@ -59,11 +115,13 @@ async function processElement(element: HTMLElement) {
         const cacheKey = `genshred_cache_${textHash}_${selectedDifficulty}_${effectiveCustomPromptTemplate || 'no_custom_prompt'}_${currentSettings[STORAGE_KEYS.SENTENCE_COUNT]}`;
 
         const cachedData = await chrome.storage.local.get(cacheKey);
+        console.log("Checking cache for key:", cacheKey);
+        console.log("Cached data retrieved:", cachedData);
 
         if (cachedData[cacheKey]) {
             console.log("Using cached response from chrome.storage.local for element:", textBlock.substring(0, 50) + "...");
             const { processedSentences, allOriginalSentences } = cachedData[cacheKey];
-            applyRewritesToElement(element, processedSentences, allOriginalSentences);
+            applyRewritesToElement(element, processedSentences, allOriginalSentences, textNodeMappings);
             element.classList.add('genshred-processed');
             element.classList.remove('genshred-processing');
             return;
@@ -77,18 +135,21 @@ async function processElement(element: HTMLElement) {
             text: textBlock
         });
 
-        if (splitResponse.error) {
-            console.error("Error splitting sentences via background script:", splitResponse.error);
+        if (splitResponse === undefined || splitResponse === null || splitResponse.error) {
+            console.error("Error splitting sentences via background script:", splitResponse?.error || "No response or unknown error");
             return; // Stop processing if sentence splitting fails
         }
         const sentences = splitResponse.sentences;
-        console.log(`Split text into ${sentences.length} sentences`);
+        console.log(`Split text into ${sentences.length} sentences:`, sentences);
+
         const sentencesWithOriginalData = sentences.map((sentence, index) => ({
             sentence,
             index,
             startIndex: textBlock.indexOf(sentence), // Track original position
             complexity: calculateComplexityScore(sentence)
         }));
+
+        console.log("Sentences with calculated complexity scores:", sentencesWithOriginalData);
 
         // Calculate number of sentences to rewrite based on percentage
         const percentageToRewrite = Number(currentSettings[STORAGE_KEYS.SENTENCE_COUNT]); // This is now a percentage (0-100)
@@ -98,6 +159,8 @@ async function processElement(element: HTMLElement) {
             sentencesWithOriginalData,
             numSentencesToRewrite
         );
+        console.log(`Selected ${selectedSentences.length} sentences for rewriting:`, selectedSentences);
+
         // // Calculate complexity scores
         //  const sentencesWithScores = sentences.map((sentence, index) => ({
         //     sentence,
@@ -121,30 +184,6 @@ async function processElement(element: HTMLElement) {
         }> = [];
 
         for (const { sentence, index, startIndex } of selectedSentences) {
-                        // NEW: Check if this sentence spans multiple text nodes in the original DOM structure
-            let startNode: Text | null = null;
-            let endNode: Text | null = null;
-            let currentGlobalOffset = 0;
-            const originalTextGlobalEnd = startIndex + sentence.length;
-
-            for (const mapping of textNodeMappings) {
-                const nodeLength = (mapping.node.textContent || '').length;
-
-                if (startNode === null && startIndex >= currentGlobalOffset && startIndex < currentGlobalOffset + nodeLength) {
-                    startNode = mapping.node;
-                }
-
-                if (endNode === null && originalTextGlobalEnd > currentGlobalOffset && originalTextGlobalEnd <= currentGlobalOffset + nodeLength) {
-                    endNode = mapping.node;
-                    break;
-                }
-                currentGlobalOffset += nodeLength;
-            }
-
-            if (startNode && endNode && startNode !== endNode) {
-                console.warn(`Pre-emptively skipping sentence for rewriting (spans multiple text nodes): "${sentence.substring(0, Math.min(sentence.length, 50))}..."`);
-                continue; // Skip this sentence, don't send it for rewriting
-            }
             const result = await new Promise<ProcessResponse>((resolve) => {
                 // Determine which prompt to use based on difficulty level
                 // let promptToUse = selectedDifficulty === "Custom_1" 
@@ -183,7 +222,7 @@ async function processElement(element: HTMLElement) {
             // Store the processed sentences and all original sentences in cache
             console.log("Storing processed sentences in chrome.storage.local for cacheKey:", cacheKey);
             await chrome.storage.local.set({ [cacheKey]: { processedSentences, allOriginalSentences: sentences } });
-            applyRewritesToElement(element, processedSentences, sentences); // Pass all original sentences and mappings
+            applyRewritesToElement(element, processedSentences, sentences, textNodeMappings); // Pass all original sentences and mappings
             element.classList.add('genshred-processed');
         }
     } catch (error) {
@@ -222,13 +261,18 @@ const DEFAULT_SETTINGS = {
 
 // Variables to hold current settings state in content script
 let currentSettings = { ...DEFAULT_SETTINGS };
-// NEW: Store the loaded difficulty mappings
+// NEW: Store the loaded difficulty mappings and custom prompts
 let currentDifficultyMappings: { [key: string]: string } = {
     "Easy": "Simplify vocabulary and sentence structure for a beginner (A2 CEFR level).",
     "Normal": "Rewrite for an intermediate English speaker (B2 CEFR level). Use clear and concise language.",
     "Hard": "Rewrite for an advanced English speaker (C1 CEFR level). Use sophisticated vocabulary while maintaining clarity.",
-    "Custom_1": "Rewrite for a user with specific needs, as defined by the custom prompt below."
 };
+
+// NEW: Store custom prompts loaded from storage
+let currentCustomPrompts: Array<{ id: string; name: string; prompt: string }> = [];
+
+// NEW: State for manual select mode
+let manualSelectModeEnabled = false;
 
 // 全局提示框元素
 let tooltipElement: HTMLElement | null = null;
@@ -387,7 +431,9 @@ async function loadSettings() {
     console.log("Content script loading settings...");
     const storedSettings = await chrome.storage.local.get([
         ...Object.values(STORAGE_KEYS),
-        'genShredDifficultyMapping' // Load the new mapping key
+        'genShredDifficultyMapping', // Load the new mapping key
+        'genShredCustomPrompts', // Load custom prompts
+        'genShredManualSelect' // Load manual select mode
     ]);
 
     // Update currentSettings with loaded values, falling back to defaults
@@ -400,9 +446,15 @@ async function loadSettings() {
 
     // Update difficulty mappings
     currentDifficultyMappings = storedSettings['genShredDifficultyMapping'] ?? currentDifficultyMappings;
+    // NEW: Update custom prompts
+    currentCustomPrompts = storedSettings['genShredCustomPrompts'] ?? [];
+    // NEW: Load manual select mode state
+    manualSelectModeEnabled = storedSettings['genShredManualSelect'] ?? false;
 
     console.log("Settings loaded:", currentSettings);
     console.log("Difficulty mappings loaded:", currentDifficultyMappings);
+    console.log("Custom prompts loaded:", currentCustomPrompts);
+    console.log("Manual select mode enabled:", manualSelectModeEnabled);
 
     // --- Initial Action based on loaded state ---
     if (currentSettings[STORAGE_KEYS.IS_ON]) {
@@ -454,6 +506,19 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
                 settingsChanged = true;
                 console.log(`Difficulty mappings updated:`, currentDifficultyMappings);
               }
+            // NEW: Handle custom prompts storage change
+            else if (key === 'genShredCustomPrompts') {
+                currentCustomPrompts = changes[key].newValue;
+                settingsChanged = true;
+                console.log(`Custom prompts updated:`, currentCustomPrompts);
+            }
+            // NEW: Handle manual select mode storage change
+            else if (key === 'genShredManualSelect') {
+                manualSelectModeEnabled = changes[key].newValue;
+                console.log(`Manual select mode changed to: ${manualSelectModeEnabled}`);
+                // No need to re-process paragraphs here, as it's a mode toggle
+                // We might need to hide/show the button based on this, handled by listeners
+              }
           }
 
         // If any relevant settings changed and plugin is on, reprocess paragraphs
@@ -472,6 +537,10 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
 function initialize() {
     loadSettings();
     createTooltip(); // 创建全局提示框
+    
+    // Add event listeners for manual selection
+    document.addEventListener('mouseup', handleTextSelection);
+    document.addEventListener('mousedown', hideRewriteButton); // Hide if user clicks elsewhere
     
     // 添加全局事件监听器，用于innerHTML方法添加的元素
     document.addEventListener('genshred-tooltip-show', (e: Event) => {
@@ -618,16 +687,72 @@ async function processParagraphs() {
     // Select all potential text elements
     const textElements = Array.from(document.querySelectorAll("p, div, span, h1, h2, h3, h4, h5, h6, li, td, th"))
         .filter(element => {
-            return element instanceof HTMLElement && 
-                !element.classList.contains('genshred-processed') &&
-                !element.classList.contains('genshred-processing') &&
-                !element.closest('.genshred-rewrite-container') && // Skip if part of a rewritten block
-                !element.closest('.genshred-tooltip-container') && // Skip if part of the tooltip
-                !observedElements.has(element) &&
-                element.textContent?.trim().length >= MIN_PARAGRAPH_LENGTH;
+            const trimmedTextLength = element.textContent?.trim().length || 0;
+            // Logging for debugging filter conditions
+            if (!(element instanceof HTMLElement)) {
+                // console.log("Filtering out non-HTMLElement:", element);
+                return false;
+            }
+            if (element.classList.contains('genshred-processed')) {
+                // console.log("Filtering out already processed element:", element.nodeName, element.textContent?.substring(0, 50) + "...");
+                return false;
+            }
+            if (element.classList.contains('genshred-processing')) {
+                // console.log("Filtering out element currently processing:", element.nodeName, element.textContent?.substring(0, 50) + "...");
+                return false;
+            }
+            if (element.closest('.genshred-rewrite-container')) {
+                // console.log("Filtering out element part of rewrite container:", element.nodeName, element.textContent?.substring(0, 50) + "...");
+                return false;
+            }
+            if (element.closest('.genshred-tooltip-container')) {
+                // console.log("Filtering out element part of tooltip container:", element.nodeName, element.textContent?.substring(0, 50) + "...");
+                return false;
+            }
+            if (observedElements.has(element)) {
+                // console.log("Filtering out already observed element:", element.nodeName, element.textContent?.substring(0, 50) + "...");
+                return false;
+            }
+            if (trimmedTextLength < MIN_PARAGRAPH_LENGTH) {
+                console.log(`Filtering out element due to short text length (${trimmedTextLength} chars):`, element.nodeName, element.textContent?.substring(0, 50) + "...");
+                if (element instanceof HTMLElement) { // Ensure it's an HTMLElement before adding class
+                    element.classList.add('genshred-processed');
+                }
+                return false;
+            }
+            if (trimmedTextLength > MAX_PARAGRAPH_LENGTH) {
+                console.log(`Filtering out element due to long text length (${trimmedTextLength} chars):`, element.nodeName, element.textContent?.substring(0, 50) + "...");
+                return false;
+            }
+
+            // NEW: Additional filtering for elements that are likely not human-readable content
+            const tagName = element.tagName;
+            if (tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT' || tagName === 'BUTTON') {
+                // console.log("Filtering out form control element:", element.nodeName, element.textContent?.substring(0, 50) + "...");
+                return false;
+            }
+            if (element.isContentEditable) {
+                // console.log("Filtering out contenteditable element:", element.nodeName, element.textContent?.substring(0, 50) + "...");
+                return false;
+            }
+            // Elements inside SVG or Canvas are usually graphical or programmatically generated
+            if (element.closest('svg') || element.closest('canvas')) {
+                // console.log("Filtering out element inside SVG/Canvas:", element.nodeName, element.textContent?.substring(0, 50) + "...");
+                return false;
+            }
+            // Heuristic: check if the text contains very few alphabetic characters, indicating it might be code or symbols
+            const alphabeticCharCount = (element.textContent?.match(/[a-zA-Z]/g) || []).length;
+            const totalCharCount = element.textContent?.length || 0;
+            // If it's a short string (e.g., < 20 chars) and less than 30% alphabetic, likely not natural language
+            if (totalCharCount > 0 && totalCharCount < 50 && (alphabeticCharCount / totalCharCount < 0.3)) {
+                // console.log("Filtering out element due to low alphabetic char count:", element.nodeName, element.textContent?.substring(0, 50) + "...");
+                return false;
+            }
+
+            return true;
         });
 
-    console.log(`Found ${textElements.length} new elements to process`);
+    console.log(`Found ${textElements.length} new elements to process after initial filtering.`);
 
     // Set up intersection observer if not already set up
     if (!intersectionObserver) {
@@ -659,6 +784,14 @@ function escapeRegExp(string: string): string {
     return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // $& 表示整个匹配的字符串
 }
 
+// 检查元素是否可见
+function isElementVisible(element: Element): boolean {
+    const style = window.getComputedStyle(element);
+    return style.display !== 'none' && 
+           style.visibility !== 'hidden' && 
+           element.getBoundingClientRect().height > 0;
+}
+
 // Helper function to escape HTML for attribute values and text content
 function escapeHTML(string: string): string {
     return string
@@ -669,47 +802,47 @@ function escapeHTML(string: string): string {
         .replace(/'/g, '&#039;');
 }
 
-// 检查元素是否可见
-function isElementVisible(element: Element): boolean {
-    const style = window.getComputedStyle(element);
-    return style.display !== 'none' && 
-           style.visibility !== 'hidden' && 
-           element.getBoundingClientRect().height > 0;
+/**
+ * Helper function to create the rewrite container span with its children and event listeners.
+ */
+function createRewriteSpan(originalText: string, rewrittenText: string): HTMLSpanElement {
+    const containerSpan = document.createElement('span');
+    containerSpan.className = 'genshred-rewrite-container';
+    containerSpan.setAttribute('data-original-text', escapeHTML(originalText));
+
+    const rewrittenSpan = document.createElement('span');
+    rewrittenSpan.className = 'genshred-rewritten';
+    rewrittenSpan.textContent = rewrittenText;
+
+    const originalHiddenSpan = document.createElement('span');
+    originalHiddenSpan.className = 'genshred-original-hidden';
+    originalHiddenSpan.textContent = originalText;
+
+    containerSpan.appendChild(rewrittenSpan);
+    containerSpan.appendChild(originalHiddenSpan);
+    
+    // Add event listeners
+    containerSpan.addEventListener('mouseover', (e) => {
+        showTooltip(originalText, e as MouseEvent, containerSpan);
+    });
+    containerSpan.addEventListener('mouseout', () => {
+                hideTooltip();
+            });
+    containerSpan.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (rewrittenSpan.style.display !== 'none') {
+            rewrittenSpan.style.display = 'none';
+            originalHiddenSpan.style.display = 'inline';
+        } else {
+            rewrittenSpan.style.display = 'inline';
+            originalHiddenSpan.style.display = 'none';
+        }
+    });
+
+    return containerSpan;
 }
 
-// Helper function to get all text nodes within an element and map their character offsets
-function getTextNodesWithOffsets(element: HTMLElement): { fullText: string, mappings: Array<{ node: Text, start: number, end: number }> } {
-    const fullText: string[] = [];
-    const mappings: Array<{ node: Text, start: number, end: number }> = [];
-    let currentOffset = 0;
-
-    const walker = document.createTreeWalker(
-        element,
-        NodeFilter.SHOW_TEXT,
-        null
-    );
-
-    let currentNode: Text | null;
-    while ((currentNode = walker.nextNode() as Text) !== null) {
-        const textContent = currentNode.textContent || '';
-        if (textContent.trim().length === 0) continue; // Skip empty or whitespace-only text nodes
-
-        fullText.push(textContent);
-        mappings.push({
-            node: currentNode,
-            start: currentOffset,
-            end: currentOffset + textContent.length
-        });
-        currentOffset += textContent.length;
-    }
-
-    return {
-        fullText: fullText.join(''), // Join all text content to form the continuous plain text
-        mappings: mappings
-    };
-}
-
-// 最后的回退方法：使用innerHTML替换
+// Function to apply rewrites to an element by manipulating text nodes directly
 function applyRewritesToElement(
     element: HTMLElement,
     rewrites: Array<{
@@ -718,7 +851,8 @@ function applyRewritesToElement(
         original_index: number;
         start_position: number;
     }>,
-    allOriginalSentences: string[]
+    allOriginalSentences: string[], // Still useful for context, but not for direct DOM mapping
+    textNodeMappings: Array<{ node: Text, start: number, end: number }>
 ) {
     if (!rewrites || rewrites.length === 0) {
         element.classList.add('genshred-processed');
@@ -726,146 +860,79 @@ function applyRewritesToElement(
         return; // Nothing to rewrite
     }
 
-    // Create a map for quick lookup of rewritten sentences by their original_index
-    const rewritesMap = new Map<number, string>();
-    rewrites.forEach(rewrite => {
-        rewritesMap.set(rewrite.original_index, rewrite.rewritten_text);
-    });
+    // Sort rewrites by their start position to process them sequentially
+    rewrites.sort((a, b) => a.start_position - b.start_position);
 
-    // Create a deep clone of the element to perform modifications without disrupting the live DOM
-    const clonedElement = element.cloneNode(true) as HTMLElement;
+    // Create a map for quick lookup of rewritten sentences based on their original_index
+    const rewrittenContentByIndex = new Map<number, { original_text: string, rewritten_text: string, start_position: number }>();
+    rewrites.forEach(r => rewrittenContentByIndex.set(r.original_index, r));
 
-    // Get text nodes and their offsets from the CLONED element
-    const { fullText: clonedFullText, mappings: clonedTextNodeMappings } = getTextNodesWithOffsets(clonedElement);
-
-    // Filter rewrites to only include those that are actually present in the clonedFullText
-    // and can be accurately located. This helps in cases where `innerText` changes slightly.
-    const validRewrites = rewrites.filter(rewrite => {
-        return clonedFullText.substring(rewrite.start_position, rewrite.start_position + rewrite.original_text.length) === rewrite.original_text;
-    });
-
-    // Sort valid rewrites by their start_position in descending order
-    // This is crucial for safely modifying text content from end to beginning
-    // to avoid issues with shifted indices when manipulating DOM nodes.
-    const sortedRewrites = validRewrites.sort((a, b) => b.start_position - a.start_position);
-
-    sortedRewrites.forEach(rewrite => {
-        const originalText = rewrite.original_text;
-        const rewrittenText = rewrite.rewritten_text;
-        const originalTextGlobalStart = rewrite.start_position;
-        const originalTextGlobalEnd = originalTextGlobalStart + originalText.length;
-        const originalIndex = rewrite.original_index; // Index in allOriginalSentences
-
-        // Get the full original sentence from the list provided by the splitter, for the tooltip
-        const fullOriginalSentenceForTooltip = allOriginalSentences[originalIndex] || originalText;
-
-        // Find the text node(s) corresponding to this original sentence in the CLONE
-        let startNode: Text | null = null;
-        let endNode: Text | null = null;
-        let startOffsetInNode = -1;
-        let endOffsetInNode = -1;
-
-        let currentGlobalOffset = 0;
-        for (const mapping of clonedTextNodeMappings) {
-            const node = mapping.node;
-            const nodeText = node.textContent || '';
-        const nodeLength = nodeText.length;
+    // Iterate through textNodeMappings in reverse order to safely perform splits and replacements.
+    // This way, changes to child nodes don't affect indices of nodes yet to be processed.
+    for (let i = textNodeMappings.length - 1; i >= 0; i--) {
+        const { node: originalTextNode, start: nodeStartInFullText, end: nodeEndInFullText } = textNodeMappings[i];
+        let currentTextNode = originalTextNode; // This reference will change if splitText is called
         
-            if (startNode === null && originalTextGlobalStart >= currentGlobalOffset && originalTextGlobalStart < currentGlobalOffset + nodeLength) {
-                startNode = node;
-                startOffsetInNode = originalTextGlobalStart - currentGlobalOffset;
+        // Track the current offset within the *original full text block* that `currentTextNode` represents
+        let currentTextNodeAbsStart = nodeStartInFullText;
+
+        // Iterate through rewrites that overlap with this text node, from newest to oldest within this node
+        // (to handle overlapping rewrites correctly with splitText from right to left)
+        const overlappingRewrites = rewrites.filter(rewrite =>
+            rewrite.start_position < nodeEndInFullText && 
+            rewrite.start_position + rewrite.original_text.length > nodeStartInFullText
+        ).sort((a, b) => (b.start_position + b.original_text.length) - (a.start_position + a.original_text.length)); // Sort by end position descending
+
+        for (const rewrite of overlappingRewrites) {
+            const rewriteStartInFullText = rewrite.start_position;
+            const rewriteEndInFullText = rewriteStartInFullText + rewrite.original_text.length;
+
+            // Calculate the overlap segment within the current `currentTextNode`'s content
+            const overlapStartAbs = Math.max(currentTextNodeAbsStart, rewriteStartInFullText);
+            const overlapEndAbs = Math.min(currentTextNodeAbsStart + (currentTextNode.textContent?.length || 0), rewriteEndInFullText);
+
+            if (overlapStartAbs >= overlapEndAbs) {
+                // No overlap, or already processed part
+                continue;
             }
 
-            if (endNode === null && originalTextGlobalEnd > currentGlobalOffset && originalTextGlobalEnd <= currentGlobalOffset + nodeLength) {
-                endNode = node;
-                endOffsetInNode = originalTextGlobalEnd - currentGlobalOffset;
-                break; // Found the end node, can stop searching
+            // Calculate split points relative to the `currentTextNode`'s current content
+            const splitStartOffsetInNode = overlapStartAbs - currentTextNodeAbsStart;
+            const splitEndOffsetInNode = overlapEndAbs - currentTextNodeAbsStart;
+
+            // Split the node: [before_overlap_text][overlap_text][after_overlap_text]
+            let afterOverlapNode: Text | null = null;
+            if (splitEndOffsetInNode < (currentTextNode.textContent?.length || 0)) {
+                afterOverlapNode = currentTextNode.splitText(splitEndOffsetInNode);
             }
-            // If the sentence spans across current node
-            if (startNode !== null && endNode === null && originalTextGlobalEnd > currentGlobalOffset + nodeLength) {
-                // Continue to next node to find end
+            
+            let overlapNode: Text = currentTextNode;
+            if (splitStartOffsetInNode > 0) {
+                overlapNode = currentTextNode.splitText(splitStartOffsetInNode);
             }
-            currentGlobalOffset += nodeLength;
-        }
 
-        if (startNode && endNode) {
-            const parent = startNode.parentNode;
-            if (!parent) return;
+            // Create the rewrite span element for the overlapping part
+            const rewriteSpan = createRewriteSpan(rewrite.original_text, rewrite.rewritten_text);
 
-            // Handle sentences completely within one text node
-            if (startNode === endNode) {
-                const textBefore = startNode.textContent?.substring(0, startOffsetInNode) || '';
-                const textAfter = startNode.textContent?.substring(endOffsetInNode) || '';
-
-                const containerSpan = document.createElement('span');
-                containerSpan.className = 'genshred-rewrite-container';
-                containerSpan.setAttribute('data-original-text', escapeHTML(fullOriginalSentenceForTooltip));
-
-                const rewrittenSpan = document.createElement('span');
-                rewrittenSpan.className = 'genshred-rewritten';
-                rewrittenSpan.textContent = rewrittenText;
-
-                const originalSpan = document.createElement('span');
-                originalSpan.className = 'genshred-original-hidden';
-                originalSpan.textContent = fullOriginalSentenceForTooltip;
-
-                containerSpan.appendChild(rewrittenSpan);
-                containerSpan.appendChild(originalSpan);
-
-                const fragment = document.createDocumentFragment();
-                if (textBefore) fragment.appendChild(document.createTextNode(textBefore));
-                fragment.appendChild(containerSpan);
-                if (textAfter) fragment.appendChild(document.createTextNode(textAfter));
-
-                parent.replaceChild(fragment, startNode);
-
-            } else {
-                // Handle sentences spanning multiple text nodes (more complex)
-                // This is a common pain point for DOM manipulation.
-                // Simplification: For now, if a sentence spans multiple nodes, we'll skip rewriting it
-                // to avoid complex DOM fragmentation issues. These sentences will remain original.
-                // A more advanced solution would use the Range API or recursive node splitting.
-                console.warn(`Skipping rewrite for sentence "${originalText.substring(0, 50)}..." because it spans multiple text nodes. Complex HTML structure may prevent accurate replacement.`);
+            // Replace the `overlapNode` (which is the actual Text node containing the rewrite) with the span
+            if (overlapNode.parentNode) {
+                overlapNode.parentNode.replaceChild(rewriteSpan, overlapNode);
             }
-        }
-    });
-
-    // Finally, update the original element's innerHTML with the modified cloned content
-    element.innerHTML = clonedElement.innerHTML;
-
-    // Re-attach event listeners to the newly created .genshred-rewrite-container elements
-    element.querySelectorAll('.genshred-rewrite-container').forEach(container => {
-        if (!container.hasAttribute('data-listeners-added')) {
-            const originalText = container.getAttribute('data-original-text');
-            const rewrittenSpan = container.querySelector('.genshred-rewritten') as HTMLElement;
-            const originalSpan = container.querySelector('.genshred-original-hidden') as HTMLElement;
-
-            if (originalText && rewrittenSpan && originalSpan) {
-                // Mouseover for tooltip
-                container.addEventListener('mouseover', (e) => {
-                    showTooltip(originalText, e as MouseEvent, container);
-                });
-
-                // Mouseout for tooltip
-                container.addEventListener('mouseout', () => {
-            hideTooltip();
-        });
-        
-                // Click listener to toggle between original and rewritten
-                container.addEventListener('click', (e) => {
-                    e.stopPropagation(); // Prevent parent clicks from interfering
-                    if (rewrittenSpan.style.display !== 'none') {
-                        rewrittenSpan.style.display = 'none';
-                        originalSpan.style.display = 'inline';
+            
+            // The `currentTextNode` for the next iteration is now the `afterOverlapNode`
+            // If `afterOverlapNode` is null, it means the rewrite extended to the end of `currentTextNode`.
+            if (afterOverlapNode) {
+                currentTextNode = afterOverlapNode;
+                currentTextNodeAbsStart = overlapEndAbs; // Update the absolute start position for the remaining part
                     } else {
-                        rewrittenSpan.style.display = 'inline';
-                        originalSpan.style.display = 'none';
-                    }
-                });
+                // The current Text node was fully consumed or no `afterOverlapNode` was created.
+                // We should break from the inner loop and continue with the next original `textNodeMappings` entry.
+                // Set currentTextNode to null to signify it's processed for this rewrite loop.
+                currentTextNode = null;
+                break;
             }
-            container.setAttribute('data-listeners-added', 'true');
         }
-    });
+    }
 
     // Mark the original element as processed
     element.classList.add('genshred-processed');
@@ -912,7 +979,21 @@ chrome.runtime.onMessage.addListener((message, _sender, _sendResponse) => {
         return false;
     }
 
-    // ... (existing TOGGLE_PLUGIN, SET_REWRITE_COUNT, SET_DIFFICULTY) ...
+    // NEW: Handle SET_DIFFICULTY message from popup, which now sends promptInstruction
+    if (message.type === "SET_DIFFICULTY") {
+        currentSettings[STORAGE_KEYS.DIFFICULTY_LEVEL] = message.difficulty; // Update stored difficulty level
+        // The promptInstruction is now directly sent from popup
+        // We don't need to look it up in currentDifficultyMappings or currentCustomPrompts here
+        // as popup has already determined the correct instruction.
+        console.log(`Difficulty level changed to: ${currentSettings[STORAGE_KEYS.DIFFICULTY_LEVEL]} and prompt instruction updated.`);
+        restoreOriginalText();
+        if (currentSettings[STORAGE_KEYS.IS_ON]) {
+            processParagraphs();
+        }
+        return false;
+    }
+
+    // ... (existing TOGGLE_PLUGIN, SET_REWRITE_COUNT) ...
     // These will mostly be handled by storage.onChanged now.
 
     // NEW: Handle CLEAR_CACHE message (as discussed previously)
@@ -924,10 +1005,10 @@ chrome.runtime.onMessage.addListener((message, _sender, _sendResponse) => {
             if (keysToRemove.length > 0) {
                 chrome.storage.local.remove(keysToRemove, () => {
                     console.log(`Removed ${keysToRemove.length} items from cache.`);
-                    restoreOriginalText(); // Revert any changes on the page
-                    if (currentSettings[STORAGE_KEYS.IS_ON]) {
-                        processParagraphs(); // Re-process the page with current settings
-                    }
+        restoreOriginalText(); // Revert any changes on the page
+        if (currentSettings[STORAGE_KEYS.IS_ON]) {
+            processParagraphs(); // Re-process the page with current settings
+        }
                 });
             } else {
                 console.log("No cache items found to remove.");
@@ -942,6 +1023,146 @@ chrome.runtime.onMessage.addListener((message, _sender, _sendResponse) => {
 
     return false;
 });
+
+// NEW: Function to handle text selection
+let rewriteButton: HTMLElement | null = null;
+let currentSelectionRange: Range | null = null; // Store the selection range
+
+function showRewriteButton(x: number, y: number) {
+    if (!rewriteButton) {
+        rewriteButton = document.createElement('button');
+        rewriteButton.textContent = 'Rewrite Selected';
+        rewriteButton.className = 'genshred-rewrite-button';
+        rewriteButton.addEventListener('click', handleRewriteSelectedText);
+        document.body.appendChild(rewriteButton);
+    }
+    rewriteButton.style.display = 'block';
+    rewriteButton.style.left = `${x}px`;
+    rewriteButton.style.top = `${y}px`;
+}
+
+function hideRewriteButton() {
+    if (rewriteButton) {
+        rewriteButton.style.display = 'none';
+    }
+    currentSelectionRange = null; // Clear selection range when button is hidden
+}
+
+async function handleRewriteSelectedText() {
+    if (!currentSelectionRange) return;
+
+    const selectedText = currentSelectionRange.toString().trim();
+    if (selectedText.length === 0) return;
+
+    console.log("Rewriting selected text:", selectedText);
+    hideRewriteButton(); // Hide button immediately
+
+    // You might want to show a loading spinner here
+    // For now, let's send it to the background script
+    try {
+        const selectedDifficulty = currentSettings[STORAGE_KEYS.DIFFICULTY_LEVEL] as string;
+        const effectivePromptInstruction = currentDifficultyMappings[selectedDifficulty] || "";
+        // If selected difficulty is a custom prompt, get its instruction from currentCustomPrompts
+        const customPrompt = currentCustomPrompts.find(cp => cp.id === selectedDifficulty);
+        const finalPromptInstruction = customPrompt ? customPrompt.prompt : effectivePromptInstruction;
+
+        const response = await chrome.runtime.sendMessage({
+            type: "PROCESS_TEXT_BLOCK",
+            textBlock: selectedText,
+            numSentences: 1, // Always rewrite as a single block for manual selection
+            promptInstruction: finalPromptInstruction,
+            customPromptTemplate: customPrompt?.prompt || "", // Pass custom prompt if applicable
+            userLevel: selectedDifficulty,
+        });
+
+        if (response?.rewritten_sentences?.[0]) {
+            const rewrittenText = response.rewritten_sentences[0].rewritten_text;
+            console.log("Rewritten text:", rewrittenText);
+            // Replace the selected text in the DOM
+            // This is a simplified replacement. A more robust solution might involve DOM range manipulation.
+            replaceSelectionWithRewrittenText(currentSelectionRange, rewrittenText, selectedText);
+        } else if (response?.error) {
+            console.error("Error rewriting selected text:", response.error);
+            alert(`Error rewriting text: ${response.error}`);
+        } else {
+            console.warn("No rewritten text received.");
+            alert("Could not rewrite text. No response from AI.");
+        }
+    } catch (error) {
+        console.error("Error during manual text rewrite:", error);
+        alert("An unexpected error occurred during rewriting.");
+    }
+}
+
+function handleTextSelection(event: MouseEvent) {
+    const selection = window.getSelection();
+    if (manualSelectModeEnabled && selection && selection.rangeCount > 0 && !selection.isCollapsed) {
+        const range = selection.getRangeAt(0);
+        const selectedText = range.toString().trim();
+
+        // Only show button if text length is reasonable and not within existing Genshred elements
+        if (selectedText.length > 0 && selectedText.length < MAX_PARAGRAPH_LENGTH &&
+            !range.commonAncestorContainer.parentElement?.closest('.genshred-rewrite-container') &&
+            !range.commonAncestorContainer.parentElement?.closest('.genshred-tooltip-container'))
+        {
+            currentSelectionRange = range; // Store the range
+            const rect = range.getBoundingClientRect();
+            showRewriteButton(rect.right + window.scrollX + 5, rect.top + window.scrollY);
+        } else {
+            hideRewriteButton();
+        }
+    } else {
+        hideRewriteButton();
+    }
+}
+
+// NEW: Function to replace selected text in DOM with rewritten text
+function replaceSelectionWithRewrittenText(range: Range, rewrittenText: string, originalText: string) {
+    // Create a new span element for the rewritten text
+    const rewrittenSpan = document.createElement('span');
+    rewrittenSpan.className = 'genshred-rewritten';
+    rewrittenSpan.textContent = rewrittenText;
+
+    // Create a hidden span for the original text
+    const originalHiddenSpan = document.createElement('span');
+    originalHiddenSpan.className = 'genshred-original-hidden';
+    originalHiddenSpan.textContent = originalText;
+
+    // Create a container for both (for toggling and tooltip)
+    const containerSpan = document.createElement('span');
+    containerSpan.className = 'genshred-rewrite-container';
+    containerSpan.setAttribute('data-original-text', originalText);
+    containerSpan.appendChild(rewrittenSpan);
+    containerSpan.appendChild(originalHiddenSpan);
+
+    // Add event listeners for toggling and tooltip
+    containerSpan.addEventListener('mouseover', (e) => {
+        showTooltip(originalText, e as MouseEvent, containerSpan);
+    });
+    containerSpan.addEventListener('mouseout', () => {
+        hideTooltip();
+    });
+    containerSpan.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (rewrittenSpan.style.display !== 'none') {
+            rewrittenSpan.style.display = 'none';
+            originalHiddenSpan.style.display = 'inline';
+        } else {
+            rewrittenSpan.style.display = 'inline';
+            originalHiddenSpan.style.display = 'none';
+        }
+    });
+
+    // Delete the currently selected content and insert the new container
+    range.deleteContents();
+    range.insertNode(containerSpan);
+
+    // Clear selection after replacement
+    const selection = window.getSelection();
+    if (selection) {
+        selection.removeAllRanges();
+    }
+}
 
 // Helper function to generate SHA256 hash
 async function sha256(message: string): Promise<string> {

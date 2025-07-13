@@ -10,17 +10,19 @@ export const STORAGE_KEYS = {
   SENTENCE_COUNT: 'genShredSentenceCount',
   DIFFICULTY_LEVEL: 'genShredDifficultyLevel',
   CUSTOM_PROMPT: 'genShredCustomPromptTemplate', // Assuming you'll add this later
-  DIFFICULTY_MAPPING: 'genShredDifficultyMapping' // Added for storing prompt mappings
+  DIFFICULTY_MAPPING: 'genShredDifficultyMapping', // Added for storing prompt mappings
+  MANUAL_SELECT: 'genShredManualSelect' // Added for manual select mode
 };
 // Define default values
 const CUSTOM_PROMPT_DEFAULT = "Rewrite the following sentence(s) for a user with language level {user_level}. Simplify vocabulary and sentence structure if necessary, while retaining the original meaning:\n\n{sentences_to_rewrite}";
 
 // Define the difficulty mapping type
-type DifficultyMapping = Record<string, string>;
+// type DifficultyMapping = Record<string, string>; // Removed duplicate definition
+type DifficultyMappings = Record<string, string>;
 
 export const DEFAULT_SETTINGS = {
   [STORAGE_KEYS.IS_ON]: true,
-  [STORAGE_KEYS.SENTENCE_COUNT]: 5,
+  [STORAGE_KEYS.SENTENCE_COUNT]: 50, // Default to 50% of sentences
   [STORAGE_KEYS.DIFFICULTY_LEVEL]: 'Normal',
   [STORAGE_KEYS.CUSTOM_PROMPT]: CUSTOM_PROMPT_DEFAULT, // Now consistently defined
   [STORAGE_KEYS.DIFFICULTY_MAPPING]: {
@@ -28,21 +30,15 @@ export const DEFAULT_SETTINGS = {
     "Normal": "Rewrite for an intermediate English speaker (B2 CEFR level). Use clear and concise language.",
     "Hard": "Rewrite for an advanced English speaker (C1 CEFR level). Use sophisticated vocabulary while maintaining clarity.",
     "Custom_1": "Rewrite for a user with specific needs, as defined by the custom prompt below."
-  } as DifficultyMapping
+  } as DifficultyMappings
 };
 
 function Popup() {
-  // On/Off 开关的状态 - 初始化时不会立即有实际值，先给默认值
-  const [isOn, setIsOn] = useState(DEFAULT_SETTINGS[STORAGE_KEYS.IS_ON]);
-
-  // "重写句子数量"滑块的状态 - 初始化时不会立即有实际值，先给默认值
-  const [sentencesToRewrite, setSentencesToRewrite] = useState(DEFAULT_SETTINGS[STORAGE_KEYS.SENTENCE_COUNT]);
-
-  // 难度选择状态 - 初始化时不会立即有实际值，先给默认值
+  // Variables to hold current settings state in popup
+  const [isOn, setIsOn] = useState<boolean>(DEFAULT_SETTINGS[STORAGE_KEYS.IS_ON] as boolean);
+  const [sentencesToRewrite, setSentencesToRewrite] = useState<number>(DEFAULT_SETTINGS[STORAGE_KEYS.SENTENCE_COUNT] as number);
   const [difficulty, setDifficulty] = useState<string>(DEFAULT_SETTINGS[STORAGE_KEYS.DIFFICULTY_LEVEL] as string);
-
-  // YUANYOU 手动选择 --> 开发中阶段 (Assuming this state doesn't need persistence in storage for now)
-  const [manualSelect, setManualSelect] = useState(false);
+  const [manualSelect, setManualSelect] = useState(false); // State for manual selection mode
   
   // State for prompt settings modal
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -52,7 +48,16 @@ function Popup() {
   
   // State to track if user is logged in
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [currentUser, setCurrentUser] = useState('');
+  const [currentUser, setCurrentUser] = useState<string | null>(null);
+
+  // State for user-defined difficulty mappings
+  const [difficultyMappings, setDifficultyMappings] = useState<DifficultyMappings>({
+    "Easy": "Simplify vocabulary and sentence structure for a beginner (A2 CEFR level).",
+    "Normal": "Rewrite for an intermediate English speaker (B2 CEFR level). Use clear and concise language.",
+    "Hard": "Rewrite for an advanced English speaker (C1 CEFR level). Use sophisticated vocabulary while maintaining clarity.",
+  });
+  // NEW: State for custom prompts
+  const [customPrompts, setCustomPrompts] = useState<Array<{ id: string; name: string; prompt: string }>>([]);
 
   // --- NEW: Load settings from storage when the popup mounts ---
   useEffect(() => {
@@ -62,23 +67,33 @@ function Popup() {
         STORAGE_KEYS.IS_ON,
         STORAGE_KEYS.SENTENCE_COUNT,
         STORAGE_KEYS.DIFFICULTY_LEVEL,
-        STORAGE_KEYS.DIFFICULTY_MAPPING
-        // STORAGE_KEYS.CUSTOM_PROMPT // Load prompt if stored
+        STORAGE_KEYS.DIFFICULTY_MAPPING,
+        'genShredDifficultyMapping', // Load difficulty mappings
+        'genShredCustomPrompts', // Load custom prompts
+        'genShredManualSelect' // Load manual select state
       ]);
 
       // Update state with loaded values, fall back to defaults if not set
       setIsOn(storedSettings[STORAGE_KEYS.IS_ON] ?? DEFAULT_SETTINGS[STORAGE_KEYS.IS_ON]);
       setSentencesToRewrite(storedSettings[STORAGE_KEYS.SENTENCE_COUNT] ?? DEFAULT_SETTINGS[STORAGE_KEYS.SENTENCE_COUNT]);
       setDifficulty(String(storedSettings[STORAGE_KEYS.DIFFICULTY_LEVEL] ?? DEFAULT_SETTINGS[STORAGE_KEYS.DIFFICULTY_LEVEL]));
+      // NEW: Load manual select state
+      setManualSelect(storedSettings['genShredManualSelect'] ?? false);
       
       // Initialize difficulty mapping if not set
-      if (!storedSettings[STORAGE_KEYS.DIFFICULTY_MAPPING]) {
+      if (!storedSettings['genShredDifficultyMapping']) {
         await chrome.storage.local.set({ 
-          [STORAGE_KEYS.DIFFICULTY_MAPPING]: DEFAULT_SETTINGS[STORAGE_KEYS.DIFFICULTY_MAPPING] 
+          'genShredDifficultyMapping': DEFAULT_SETTINGS[STORAGE_KEYS.DIFFICULTY_MAPPING] 
         });
+      } else {
+        setDifficultyMappings(prev => ({ ...prev, ...storedSettings['genShredDifficultyMapping'] }));
       }
       
       // setCustomPrompt(storedSettings[STORAGE_KEYS.CUSTOM_PROMPT] ?? DEFAULT_SETTINGS[STORAGE_KEYS.CUSTOM_PROMPT]); // Load prompt
+      // NEW: Load custom prompts
+      if (storedSettings['genShredCustomPrompts']) {
+        setCustomPrompts(storedSettings['genShredCustomPrompts']);
+      }
 
       // Optional: Send initial state to content script on load if plugin was already enabled
       // However, content script should load state itself on page load.
@@ -182,12 +197,44 @@ function Popup() {
     // --- NEW: Save the new difficulty to storage ---
     await chrome.storage.local.set({ [STORAGE_KEYS.DIFFICULTY_LEVEL]: value });
 
+    // Determine the effective prompt instruction to send to content script
+    let promptInstructionToSend = "";
+    if (difficultyMappings[value as keyof DifficultyMappings]) {
+        promptInstructionToSend = difficultyMappings[value as keyof DifficultyMappings];
+    } else {
+        // Check if it's a custom prompt by ID
+        const selectedCustomPrompt = customPrompts.find(cp => cp.id === value);
+        if (selectedCustomPrompt) {
+            promptInstructionToSend = selectedCustomPrompt.prompt;
+        }
+    }
+
     // Also send message to content script
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       if (tabs[0]?.id) {
         chrome.tabs.sendMessage(tabs[0].id, {
           type: "SET_DIFFICULTY", // Existing message type
-          difficulty: value
+          difficulty: value,
+          promptInstruction: promptInstructionToSend // Send the actual instruction
+        });
+      }
+    });
+  };
+
+  // Handle manual select toggle
+  const handleManualSelectToggle = async () => {
+    const newState = !manualSelect;
+    setManualSelect(newState);
+    console.log('Manual Select is now:', newState ? 'On' : 'Off');
+
+    await chrome.storage.local.set({ [STORAGE_KEYS.MANUAL_SELECT]: newState });
+
+    // Send message to content script to update manual select mode
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs[0]?.id) {
+        chrome.tabs.sendMessage(tabs[0].id, {
+          type: "SET_MANUAL_SELECT_MODE",
+          enabled: newState
         });
       }
     });
@@ -231,12 +278,12 @@ const handleClearCache = async () => {
           <label htmlFor="on-off-toggle">On/ Off</label>
           {/* Switch Toggle Component */}
           <label className="switch">
-            <input
-              type="checkbox"
-              id="on-off-toggle"
-              checked={!!isOn} // Ensure boolean
-              onChange={handleToggle} // Use handler
-            />
+          <input
+            type="checkbox"
+            id="on-off-toggle"
+            checked={!!isOn} // Ensure boolean
+            onChange={handleToggle} // Use handler
+          />
             <span className="slider round"></span>
           </label>
         </div>
@@ -264,36 +311,52 @@ const handleClearCache = async () => {
             <option value="Easy">Easy</option>
             <option value="Normal">Normal</option>
             <option value="Hard">Hard</option>
-            {/* 将Custom_1移到最后 */}
+            {/* Dynamically add custom prompts */}
+            {customPrompts.map((cp) => (
+              <option key={cp.id} value={cp.id}>{cp.name}</option>
+            ))}
             <option value="Add Custom...">Add Custom...</option>
-            <option value="Custom_1">Custom_1</option>
           </select>
           {/* 从 Figma 获取的搜索和清除图标需要更复杂的组件实现 */}
         </div>
 
-        {/* Clear Cache Button */}
+        {/* Manual Select Toggle */}
         <div className="control-group">
-          <button
-            className="clear-cache-button"
-            onClick={handleClearCache}
-          >
-            Clear Cache
-          </button>
+          <label htmlFor="manual-select-toggle">Manual Select Mode</label>
+          <label className="switch">
+            <input
+              type="checkbox"
+              id="manual-select-toggle"
+              checked={!!manualSelect}
+              onChange={handleManualSelectToggle}
+            />
+            <span className="slider round"></span>
+          </label>
         </div>
 
+        {/* Clear Cache Button */}
+       <div className="control-group">
+            <button 
+                className="clear-cache-button"
+                onClick={handleClearCache}
+            >
+                Clear Cache
+            </button>
+        </div>
+        
       </section>
 
-      {/* User Modal */}
-      <UserModal
-        isOpen={isUserModalOpen}
-        onClose={() => setIsUserModalOpen(false)}
-      />
-
-      {/* Prompt Settings Modal */}
-      <PromptSettingsModal
-        isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-      />
+        {/* User Modal */}
+        <UserModal 
+          isOpen={isUserModalOpen} 
+          onClose={() => setIsUserModalOpen(false)} 
+        />
+        
+        {/* Prompt Settings Modal */}
+        <PromptSettingsModal 
+          isOpen={isModalOpen} 
+          onClose={() => setIsModalOpen(false)} 
+        />
     </div>
   );
 }

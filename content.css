@@ -90,3 +90,23 @@
     font-style: italic;
     margin-left: 5px;
 }
+
+/* Styles for the manual rewrite button */
+.genshred-rewrite-button {
+    position: absolute;
+    background-color: #007bff; /* A nice blue */
+    color: white;
+    border: none;
+    border-radius: 4px;
+    padding: 8px 12px;
+    font-size: 14px;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    z-index: 10001; /* Higher than tooltip */
+    display: none; /* Hidden by default, shown by JS */
+    transition: background-color 0.2s ease;
+}
+
+.genshred-rewrite-button:hover {
+    background-color: #0056b3;
+}
