@@ -19,6 +19,19 @@
     z-index: 1002;
 }
 
+/* Dark mode styles for rewritten sentences */
+.genshred-rewritten.genshred-dark-mode {
+    background-color: #2d3748; /* Dark gray background */
+    color: #e2e8f0; /* Light gray text */
+    border: 1px solid #4a5568; /* Dark border */
+}
+
+/* Dark mode hover effect */
+.genshred-rewritten.genshred-dark-mode:hover {
+    background-color: #4a5568;
+    color: #f7fafc;
+}
+
 /* Create a single global tooltip container that all elements will use */
 .genshred-tooltip-container {
     display: none;

@@ -111,6 +111,24 @@
     background-color: #e0e0e0;
   }
   
+  /* Clear all rewrites button */
+  .clear-rewrites-button {
+    background-color: #ffebee;
+    color: #d32f2f;
+    border: 1px solid #ffcdd2;
+    border-radius: 4px;
+    padding: 8px 16px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    margin-top: 10px;
+    width: 100%;
+  }
+  
+  .clear-rewrites-button:hover {
+    background-color: #ffcdd2;
+  }
+  
 /* The switch - the box around the slider */
 .switch {
   position: relative;

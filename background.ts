@@ -63,7 +63,7 @@ chrome.runtime.onMessage.addListener(
 
         if (!response.ok) {
             const errorText = await response.text();
-            sendResponse({ error: `Backend error: ${response.status} - ${errorText}` });
+            sendResponse({ error: `[Process Text] Backend error: ${response.status} - ${errorText}` });
             return true;
         }
 
@@ -71,7 +71,7 @@ chrome.runtime.onMessage.addListener(
         sendResponse(data);
 
       } catch (err) {
-        sendResponse({ error: `Frontend fetch error: ${err.message}` });
+        sendResponse({ error: `[Process Text] Frontend fetch error: ${err.message}` });
       }
       return true;
     }
@@ -90,7 +90,7 @@ chrome.runtime.onMessage.addListener(
 
         if (!response.ok) {
           const errorText = await response.text();
-          sendResponse({ error: `Backend error: ${response.status} - ${errorText}` });
+          sendResponse({ error: `[Sentence Splitting]Backend error: ${response.status} - ${errorText}` });
           return true;
         }
 
@@ -99,12 +99,12 @@ chrome.runtime.onMessage.addListener(
 
       } catch (err) {
         // Ensure an object is always sent, even on fetch error
-        sendResponse({ error: `Frontend fetch error: ${err.message}` });
+        sendResponse({ error: `[Sentence Splitting]Frontend fetch error: ${err.message}` });
       }
       return true;
     }
 
-    if (message.type === "TRACK_EVENT") {
+     if (message.type === "TRACK_EVENT") {
         const { eventType, eventData } = message;
         const userId = await getUserId();
 
@@ -123,7 +123,7 @@ chrome.runtime.onMessage.addListener(
              console.error("Error calling backend /track_event:", err);
         }
         return false; // No async response needed for tracking
-    }
+     }
 
     if (message.type === "ADJUST_TEXT") {
         console.warn("ADJUST_TEXT message type is deprecated. Use PROCESS_TEXT_BLOCK instead.");
