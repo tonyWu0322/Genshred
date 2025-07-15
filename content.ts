@@ -13,14 +13,14 @@ interface ProcessResponse {
 const PROCESSING_DELAY = 1000; // 1 second delay between processing requests
 // const PARAGRAPH_CACHE = new Map<string, any>(); // Cache for processed paragraphs not yet effective 未实装
 const MIN_PARAGRAPH_LENGTH = 100; // Minimum characters to process
-const MAX_PARAGRAPH_LENGTH = 5000; // Maximum characters to process
+const MAX_PARAGRAPH_LENGTH = 11451419; // Maximum characters to process
 // lazyloading
 let intersectionObserver: IntersectionObserver | null = null;
 const observedElements = new WeakSet<Element>();
 // Define keys for storage (should match popup.tsx)
 
 async function processElement(element: HTMLElement) {
-    console.log("原神原神原神Attempting to process element:", element.nodeName, element.textContent?.substring(0, 50) + "...");
+    console.log("[New Attempt] Attempting to process element:", element.nodeName, element.textContent?.substring(0, 50) + "...");
     try {
         if (!currentSettings[STORAGE_KEYS.IS_ON]) {
             console.log("Skipping element: Plugin is OFF.");

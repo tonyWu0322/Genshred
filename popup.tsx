@@ -411,7 +411,7 @@ const handleReadingModeToggle = async () => {
         </div>
 
         {/* Reading Mode Toggle */}
-        <div className="control-group">
+        <div className="control-group" style={{display:"none"}}>
           <label htmlFor="reading-mode-toggle">Reading Mode</label>
           <label className="switch">
             <input
