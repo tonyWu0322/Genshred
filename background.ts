@@ -125,6 +125,29 @@ chrome.runtime.onMessage.addListener(
         return false; // No async response needed for tracking
      }
 
+    if (message.type === "AI_CHAT_MESSAGE") {
+      const { chatMessage } = message;
+      const userId = await getUserId();
+      try {
+        const backendUrl = `${SERVER_URL}/chat`;
+        const response = await fetch(backendUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: chatMessage, userId })
+        });
+        if (!response.ok) {
+          const errorText = await response.text();
+          sendResponse({ error: `[AI Chat] Backend error: ${response.status} - ${errorText}` });
+          return true;
+        }
+        const data = await response.json();
+        sendResponse(data);
+      } catch (err) {
+        sendResponse({ error: `[AI Chat] Frontend fetch error: ${err.message}` });
+      }
+      return true;
+    }
+
     if (message.type === "ADJUST_TEXT") {
         console.warn("ADJUST_TEXT message type is deprecated. Use PROCESS_TEXT_BLOCK instead.");
         sendResponse({ error: "ADJUST_TEXT message type deprecated." });
