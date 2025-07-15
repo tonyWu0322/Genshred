@@ -169,8 +169,6 @@ async function processElement(element: HTMLElement) {
             return;
         }
 
-        // Process text in chunks
-        
         // Request sentence splitting from background script
         const splitResponse = await chrome.runtime.sendMessage({
             type: "SPLIT_SENTENCES",
@@ -219,69 +217,35 @@ async function processElement(element: HTMLElement) {
         );
         console.log(`Selected ${selectedSentences.length} sentences for rewriting:`, selectedSentences);
 
-        // // Calculate complexity scores
-        //  const sentencesWithScores = sentences.map((sentence, index) => ({
-        //     sentence,
-        //     index,
-        //     complexity: calculateComplexityScore(sentence)
-        // }));
-
-        // // Select most complex sentences
-        // const numSentencesToRewrite = Math.min(
-        //     Number(currentSettings[STORAGE_KEYS.SENTENCE_COUNT]), 
-        //     sentencesWithScores.length
-        // );
-        // const selectedSentences = selectSentences(sentencesWithScores, numSentencesToRewrite);
-
-        // Process each selected sentence separately
-        const processedSentences: Array<{
-            original_text: string;
-            rewritten_text: string;
-            original_index: number;
-            start_position: number;
-        }> = [];
-
+        // Process each selected sentence separately and apply as soon as result is ready
+        let processedCount = 0;
         for (const { sentence, index, startIndex } of selectedSentences) {
-            const result = await new Promise<ProcessResponse>((resolve) => {
-                // Determine which prompt to use based on difficulty level
-                // let promptToUse = selectedDifficulty === "Custom_1" 
-                //     ? effectiveCustomPromptTemplate 
-                //     : effectivePromptInstruction;
-                let promptToUse = effectivePromptInstruction; // Use the mapped instruction
-                chrome.runtime.sendMessage(
-                    {
-                        type: "PROCESS_TEXT_BLOCK",
-                        textBlock: sentence,
-                        numSentences: 1,
-                        promptInstruction: promptToUse,  // Use the correctly selected prompt
-                        customPromptTemplate: effectiveCustomPromptTemplate,
-                        userLevel: selectedDifficulty,
-                        originalIndex: index
-                    },
-                    (response) => resolve(response)
-                );
-            });
-
-            if (result?.rewritten_sentences?.[0]) {
-                processedSentences.push({
-                    original_text: sentence,
-                    rewritten_text: result.rewritten_sentences[0].rewritten_text,
-                    original_index: index,
-                    start_position: startIndex // Add position information
+            (async () => {
+                const result = await new Promise<ProcessResponse>((resolve) => {
+                    let promptToUse = effectivePromptInstruction;
+                    chrome.runtime.sendMessage(
+                        {
+                            type: "PROCESS_TEXT_BLOCK",
+                            textBlock: sentence,
+                            numSentences: 1,
+                            promptInstruction: promptToUse,
+                            customPromptTemplate: effectiveCustomPromptTemplate,
+                            userLevel: selectedDifficulty,
+                            originalIndex: index
+                        },
+                        (response) => resolve(response)
+                    );
                 });
-            }
-        }
-
-        // Sort by position before applying
-        processedSentences.sort((a, b) => a.start_position - b.start_position);
-
-
-        if (processedSentences.length > 0) {
-            // Store the processed sentences and all original sentences in cache
-            console.log("Storing processed sentences in chrome.storage.local for cacheKey:", cacheKey);
-            await chrome.storage.local.set({ [cacheKey]: { processedSentences, allOriginalSentences: sentences } });
-            applyRewritesToElement(element, processedSentences, sentences, textNodeMappings); // Pass all original sentences and mappings
-            element.classList.add('genshred-processed');
+                if (result?.rewritten_sentences?.[0]) {
+                    applySingleRewriteToElement(element, sentence, result.rewritten_sentences[0].rewritten_text, startIndex, textNodeMappings);
+                }
+                processedCount++;
+                // When all rewrites are done, mark as processed
+                if (processedCount === selectedSentences.length) {
+                    element.classList.add('genshred-processed');
+                    element.classList.remove('genshred-processing');
+                }
+            })();
         }
     } catch (error) {
         console.error("Error in processElement:", error);
@@ -764,7 +728,7 @@ function setupIntersectionObserver() {
             }
         },
         {
-            rootMargin: '500px 0px',
+            rootMargin: '2000px 0px',
             threshold: [0, 0.1]
         }
     );
@@ -1361,4 +1325,53 @@ async function sha256(message: string): Promise<string> {
     const hashArray = Array.from(new Uint8Array(hashBuffer));
     const hexHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
     return hexHash;
+}
+
+// New function: applySingleRewriteToElement
+function applySingleRewriteToElement(
+    element: HTMLElement,
+    originalText: string,
+    rewrittenText: string,
+    startIndex: number, // no longer used, but kept for signature compatibility
+    textNodeMappings: Array<{ node: Text, start: number, end: number }> // no longer used
+) {
+    // Helper: Recursively search for the first text node containing the target text, skipping rewritten spans
+    function findTextNodeWithSentence(node: Node, sentence: string): { textNode: Text, offset: number } | null {
+        if (node.nodeType === Node.TEXT_NODE) {
+            const text = node.nodeValue || '';
+            const offset = text.indexOf(sentence);
+            if (offset !== -1) {
+                return { textNode: node as Text, offset };
+            }
+            return null;
+        } else if (node.nodeType === Node.ELEMENT_NODE) {
+            const el = node as HTMLElement;
+            // Skip already rewritten containers
+            if (el.classList.contains('genshred-rewrite-container')) return null;
+            for (const child of Array.from(node.childNodes)) {
+                const result = findTextNodeWithSentence(child, sentence);
+                if (result) return result;
+            }
+        }
+        return null;
+    }
+
+    // Find the first occurrence of the original sentence in a text node (not already rewritten)
+    const found = findTextNodeWithSentence(element, originalText);
+    if (!found) {
+        // Already rewritten or not found
+        return;
+    }
+    const { textNode, offset } = found;
+    // Use a DOM Range to isolate the sentence
+    const range = document.createRange();
+    range.setStart(textNode, offset);
+    range.setEnd(textNode, offset + originalText.length);
+    // Create the rewrite span
+    const rewriteSpan = createRewriteSpan(originalText, rewrittenText);
+    // Replace the range with the rewrite span
+    range.deleteContents();
+    range.insertNode(rewriteSpan);
+    // Clean up selection
+    range.detach();
 }
