@@ -42,6 +42,7 @@ async function getPromptForDifficulty(difficultyLevel: string): Promise<string> 
 chrome.runtime.onMessage.addListener(
   async (message, sender, sendResponse) => {
     if (message.type === "PROCESS_TEXT_BLOCK") {
+      console.log("[bg info] PROCESS_TEXT_BLOCK message received")
       const { textBlock, numSentences, userLevel, promptInstruction, customPromptTemplate } = message;
       const userId = await getUserId();
       const difficultyPrompt = await getPromptForDifficulty(userLevel);
@@ -90,7 +91,7 @@ chrome.runtime.onMessage.addListener(
 
         if (!response.ok) {
           const errorText = await response.text();
-          sendResponse({ error: `[Sentence Splitting]Backend error: ${response.status} - ${errorText}` });
+          sendResponse({ error: `[Sentence Splitting] Backend error: ${response.status} - ${errorText}` });
           return true;
         }
 
@@ -99,7 +100,7 @@ chrome.runtime.onMessage.addListener(
 
       } catch (err) {
         // Ensure an object is always sent, even on fetch error
-        sendResponse({ error: `[Sentence Splitting]Frontend fetch error: ${err.message}` });
+        sendResponse({ error: `[Sentence Splitting] Frontend fetch error: ${err.message}` });
       }
       return true;
     }
