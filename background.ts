@@ -40,122 +40,151 @@ async function getPromptForDifficulty(difficultyLevel: string): Promise<string> 
 }
 
 chrome.runtime.onMessage.addListener(
-  async (message, sender, sendResponse) => {
+  (message, sender, sendResponse) => {
+    console.log("[bg] Received message:", message.type);
+    
     if (message.type === "PROCESS_TEXT_BLOCK") {
       console.log("[bg info] PROCESS_TEXT_BLOCK message received")
       const { textBlock, numSentences, userLevel, promptInstruction, customPromptTemplate } = message;
-      const userId = await getUserId();
-      const difficultyPrompt = await getPromptForDifficulty(userLevel);
+      
+      // Handle async operation properly
+      (async () => {
+        try {
+          const userId = await getUserId();
+          const difficultyPrompt = await getPromptForDifficulty(userLevel);
 
-      try {
-        const backendUrl = `${SERVER_URL}/process_text`;
-        const response = await fetch(backendUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            userId: userId,
-            text: textBlock,
-            numSentences: numSentences,
-            userLevel: userLevel,
-            promptInstruction: difficultyPrompt,
-            customPromptTemplate: customPromptTemplate
-          })
-        });
+          const backendUrl = `${SERVER_URL}/process_text`;
+          const response = await fetch(backendUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              userId: userId,
+              text: textBlock,
+              numSentences: numSentences,
+              userLevel: userLevel,
+              promptInstruction: difficultyPrompt,
+              customPromptTemplate: customPromptTemplate
+            })
+          });
 
-        if (!response.ok) {
-            const errorText = await response.text();
-            sendResponse({ error: `[Process Text] Backend error: ${response.status} - ${errorText}` });
-            return true;
+          if (!response.ok) {
+              const errorText = await response.text();
+              sendResponse({ error: `[Process Text] Backend error: ${response.status} - ${errorText}` });
+              return;
+          }
+
+          const data = await response.json();
+          sendResponse(data);
+        } catch (err) {
+          console.error("[bg] Error in PROCESS_TEXT_BLOCK:", err);
+          sendResponse({ error: `[Process Text] Frontend fetch error: ${err.message}` });
         }
-
-        const data = await response.json();
-        sendResponse(data);
-
-      } catch (err) {
-        sendResponse({ error: `[Process Text] Frontend fetch error: ${err.message}` });
-      }
-      return true;
+      })();
+      
+      return true; // Keep message channel open for async response
     }
 
     if (message.type === "SPLIT_SENTENCES") {
       const { text } = message;
+      console.log("[bg] Processing SPLIT_SENTENCES for text length:", text.length);
 
-      try {
-        const backendUrl = `${SERVER_URL}/split_sentences`;
-        const response = await fetch(backendUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text }),
-          signal: AbortSignal.timeout(10000)
-        });
+      // Handle async operation properly
+      (async () => {
+        try {
+          const backendUrl = `${SERVER_URL}/split_sentences`;
+          const response = await fetch(backendUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text }),
+            signal: AbortSignal.timeout(10000)
+          });
 
-        if (!response.ok) {
-          const errorText = await response.text();
-          sendResponse({ error: `[Sentence Splitting] Backend error: ${response.status} - ${errorText}` });
-          return true;
+          if (!response.ok) {
+            const errorText = await response.text();
+            console.error("[bg] Backend error for SPLIT_SENTENCES:", response.status, errorText);
+            sendResponse({ error: `[Sentence Splitting] Backend error: ${response.status} - ${errorText}` });
+            return;
+          }
+
+          const data = await response.json();
+          console.log("[bg] SPLIT_SENTENCES success, sentences count:", data.sentences?.length || 0);
+          sendResponse(data);
+        } catch (err) {
+          console.error("[bg] Error in SPLIT_SENTENCES:", err);
+          sendResponse({ error: `[Sentence Splitting] Frontend fetch error: ${err.message}` });
         }
-
-        const data = await response.json();
-        sendResponse(data);
-
-      } catch (err) {
-        // Ensure an object is always sent, even on fetch error
-        sendResponse({ error: `[Sentence Splitting] Frontend fetch error: ${err.message}` });
-      }
-      return true;
+      })();
+      
+      return true; // Keep message channel open for async response
     }
 
-     if (message.type === "TRACK_EVENT") {
-        const { eventType, eventData } = message;
-        const userId = await getUserId();
-
+    if (message.type === "TRACK_EVENT") {
+      const { eventType, eventData } = message;
+      
+      // Handle async operation properly
+      (async () => {
         try {
-             const backendUrl = `${SERVER_URL}/track_event`;
-             await fetch(backendUrl, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                   userId: userId,
-                   eventType: eventType,
-                   eventData: eventData
-                })
-             });
+          const userId = await getUserId();
+          const backendUrl = `${SERVER_URL}/track_event`;
+          await fetch(backendUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              userId: userId,
+              eventType: eventType,
+              eventData: eventData
+            })
+          });
+          sendResponse({ success: true }); // Always send a response
         } catch (err) {
-             console.error("Error calling backend /track_event:", err);
+          console.error("[bg] Error calling backend /track_event:", err);
+          sendResponse({ error: `[Track Event] Error: ${err.message}` });
         }
-        return false; // No async response needed for tracking
-     }
+      })();
+      
+      return true; // Keep message channel open for async response
+    }
 
     if (message.type === "AI_CHAT_MESSAGE") {
       const { chatMessage } = message;
-      const userId = await getUserId();
-      try {
-        const backendUrl = `${SERVER_URL}/chat`;
-        const response = await fetch(backendUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message: chatMessage, userId })
-        });
-        if (!response.ok) {
-          const errorText = await response.text();
-          sendResponse({ error: `[AI Chat] Backend error: ${response.status} - ${errorText}` });
-          return true;
+      
+      // Handle async operation properly
+      (async () => {
+        try {
+          const userId = await getUserId();
+          const backendUrl = `${SERVER_URL}/chat`;
+          const response = await fetch(backendUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message: chatMessage, userId })
+          });
+          
+          if (!response.ok) {
+            const errorText = await response.text();
+            sendResponse({ error: `[AI Chat] Backend error: ${response.status} - ${errorText}` });
+            return;
+          }
+          
+          const data = await response.json();
+          sendResponse(data);
+        } catch (err) {
+          console.error("[bg] Error in AI_CHAT_MESSAGE:", err);
+          sendResponse({ error: `[AI Chat] Frontend fetch error: ${err.message}` });
         }
-        const data = await response.json();
-        sendResponse(data);
-      } catch (err) {
-        sendResponse({ error: `[AI Chat] Frontend fetch error: ${err.message}` });
-      }
-      return true;
+      })();
+      
+      return true; // Keep message channel open for async response
     }
 
     if (message.type === "ADJUST_TEXT") {
-        console.warn("ADJUST_TEXT message type is deprecated. Use PROCESS_TEXT_BLOCK instead.");
-        sendResponse({ error: "ADJUST_TEXT message type deprecated." });
-        return true; // Corrected: return true if sendResponse is called
+      console.warn("ADJUST_TEXT message type is deprecated. Use PROCESS_TEXT_BLOCK instead.");
+      sendResponse({ error: "ADJUST_TEXT message type deprecated." });
+      return false; // No async operation needed
     }
 
     // If no message type matches, return false
+    console.warn("[bg] Unknown message type:", message.type);
+    sendResponse({ error: `Unknown message type: ${message.type}` });
     return false;
   }
 );
