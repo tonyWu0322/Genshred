@@ -15,6 +15,23 @@ const AIChatWindow: React.FC = () => {
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const windowRef = useRef<HTMLDivElement | null>(null);
 
+  // Simple markdown processor for basic formatting
+  const processMarkdown = (text: string): string => {
+    return text
+      // Bold text
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      // Italic text
+      .replace(/\*(.*?)\*/g, '<em>$1</em>')
+      // Inline code
+      .replace(/`(.*?)`/g, '<code>$1</code>')
+      // Code blocks
+      .replace(/```(\w+)?\n([\s\S]*?)```/g, '<pre><code class="language-$1">$2</code></pre>')
+      // Links
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
+      // Line breaks
+      .replace(/\n/g, '<br>');
+  };
+
   // Auto-scroll to bottom on new message
   useEffect(() => {
     if (chatEndRef.current) {
@@ -84,7 +101,15 @@ const AIChatWindow: React.FC = () => {
       <div className="ai-chat-history">
         {messages.map((msg, i) => (
           <div key={i} className={`ai-chat-msg ai-chat-msg-${msg.sender}`}>
-            {msg.text}
+            {msg.sender === 'ai' ? (
+              <div 
+                dangerouslySetInnerHTML={{ 
+                  __html: processMarkdown(msg.text)
+                }} 
+              />
+            ) : (
+              msg.text
+            )}
           </div>
         ))}
         {loading && (

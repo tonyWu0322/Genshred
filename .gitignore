@@ -29,5 +29,8 @@ dist/
 # plasmo
 .plasmo
 
+# keys
+keys.json
+
 # typescript
 .tsbuildinfo

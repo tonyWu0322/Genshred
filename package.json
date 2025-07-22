@@ -1,13 +1,17 @@
 {
   "name": "genshred-impart",
   "displayName": "Genshred impart",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "description": "AI paraphrasal tool",
   "author": "yuanyou_test",
   "scripts": {
     "dev": "plasmo dev",
     "build": "plasmo build",
-    "package": "plasmo package"
+    "package": "plasmo package",
+    "publish:check": "node scripts/publish.js --check",
+    "publish:build": "node scripts/publish.js --build",
+    "publish:version": "node scripts/publish.js --version",
+    "publish:prepare": "node scripts/publish.js"
   },
   "dependencies": {
     "plasmo": "0.90.5",
