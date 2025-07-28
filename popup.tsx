@@ -337,7 +337,7 @@ const handleReadingModeToggle = async () => {
 
       <section className="popup-body">
         <div className="control-group">
-          <label htmlFor="on-off-toggle">On/ Off</label>
+          <label htmlFor="on-off-toggle">Auto Rewrite On/ Off</label>
           {/* Switch Toggle Component */}
           <label className="switch">
           <input

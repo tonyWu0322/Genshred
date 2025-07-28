@@ -85,13 +85,18 @@ chrome.runtime.onMessage.addListener(
     }
 
     if (message.type === "SPLIT_SENTENCES") {
-      const { text } = message;
+      const { text, language } = message;
       console.log("[bg] Processing SPLIT_SENTENCES for text length:", text.length);
 
       // Handle async operation properly
       (async () => {
         try {
           const backendUrl = `${SERVER_URL}/split_sentences`;
+          const body:any = { text };
+          if (language) {
+            body.language = language;
+          };
+          
           const response = await fetch(backendUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

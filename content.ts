@@ -1,6 +1,7 @@
 // content.ts
 import './content.css';
 import { SERVER_URL } from "./config";
+import { franc } from 'franc-min';
 import AIChatWindow from './components/AIChatWindow';
 import React from 'react';
 import * as ReactDOM from 'react-dom';
@@ -147,9 +148,23 @@ async function processElement(element: HTMLElement) {
 
         // Mark as processing to prevent duplicate processing
         element.classList.add('genshred-processing');
+        const detectedlanguage = franc(textBlock);
+        console.log("Detected language:", detectedlanguage);
+        if (detectedlanguage === 'und') {
+            console.log("Undetected language, skipping.");
+            return;
+        }
+        const userLangPrefs = await chrome.storage.local.get('genshred_ignore_languages');
+        const ignoreLangs: string[] = userLangPrefs['genshred_ignore_languages'] || [];
+        if (ignoreLangs.includes(detectedlanguage)) {
+            console.log(`Skipping element: Language ${detectedlanguage} is in user ignore list.`);
+            element.classList.add('genshred-processed');
+            return;
+        }
 
         const selectedDifficulty = currentSettings[STORAGE_KEYS.DIFFICULTY_LEVEL] as string;
-        const effectivePromptInstruction = currentDifficultyMappings[selectedDifficulty] || "";
+        // const effectivePromptInstruction = currentDifficultyMappings[selectedDifficulty] || "";
+        const effectivePromptInstruction = await getPromptForDifficultyAndLanguage(selectedDifficulty, detectedlanguage);
         const effectiveCustomPromptTemplate = currentSettings[STORAGE_KEYS.CUSTOM_PROMPT];
         
         console.log("Using difficulty:", selectedDifficulty);
@@ -175,7 +190,8 @@ async function processElement(element: HTMLElement) {
         // Request sentence splitting from background script
         const splitResponse = await chrome.runtime.sendMessage({
             type: "SPLIT_SENTENCES",
-            text: textBlock
+            text: textBlock,
+            language: detectedlanguage
         });
 
         if (splitResponse === undefined || splitResponse === null || splitResponse.error) {
@@ -301,6 +317,16 @@ let currentDifficultyMappings: { [key: string]: string } = {
     "Normal": "Rewrite for an intermediate English speaker (B2 CEFR level). Use clear and concise language.",
     "Hard": "Rewrite for an advanced English speaker (C1 CEFR level). Use sophisticated vocabulary while maintaining clarity.",
 };
+async function getPromptForDifficultyAndLanguage(difficulty: string, language: string): Promise<string> {
+    const { genshred_prompt_matrix } = await chrome.storage.local.get('genshred_prompt_matrix');
+    const matrix = genshred_prompt_matrix || {};
+    // Fallback order: specific language → default for difficulty → empty string
+    return (
+        matrix?.[difficulty]?.[language] ||
+        matrix?.[difficulty]?.['default'] ||
+        ''
+    );
+}
 
 // NEW: Store custom prompts loaded from storage
 let currentCustomPrompts: Array<{ id: string; name: string; prompt: string }> = [];
@@ -1213,10 +1239,16 @@ async function handleRewriteSelectedText() {
     // For now, let's send it to the background script
     try {
         const selectedDifficulty = currentSettings[STORAGE_KEYS.DIFFICULTY_LEVEL] as string;
-        const effectivePromptInstruction = currentDifficultyMappings[selectedDifficulty] || "";
+        // const effectivePromptInstruction = currentDifficultyMappings[selectedDifficulty] || "";
         // If selected difficulty is a custom prompt, get its instruction from currentCustomPrompts
+        const detectedlanguage = franc(selectedText);
+        if (detectedlanguage === 'und') {
+            console.log("Undetected language, skipping.");
+            return;
+        }
+        const effectivePromptInstruction = await getPromptForDifficultyAndLanguage(selectedDifficulty, detectedlanguage);
         const customPrompt = currentCustomPrompts.find(cp => cp.id === selectedDifficulty);
-        const finalPromptInstruction = customPrompt ? customPrompt.prompt : effectivePromptInstruction;
+        const finalPromptInstruction = effectivePromptInstruction;
 
         const response = await chrome.runtime.sendMessage({
             type: "PROCESS_TEXT_BLOCK",

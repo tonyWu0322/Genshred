@@ -159,7 +159,20 @@ const PromptSettingsModal: React.FC<PromptSettingsModalProps> = ({ isOpen, onClo
               </div>
             ))}
           </div>
-          
+          <div style={{ marginTop: 16 }}>
+            <button
+              onClick={() => {
+                if (chrome.runtime.openOptionsPage) {
+                  chrome.runtime.openOptionsPage();
+                } else {
+                  window.open(chrome.runtime.getURL('options.html'));
+                }
+              }}
+              style={{ fontSize: '0.95em', color: '#1976d2', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
+            >
+              Go to Advanced Settings
+            </button>
+          </div>
           <div className="modal-actions">
             <button className="reset-button" onClick={handleReset}>Reset</button>
             <button className="save-button" onClick={handleSave}>Save</button>
