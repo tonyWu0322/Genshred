@@ -45,7 +45,10 @@ chrome.runtime.onMessage.addListener(
     
     if (message.type === "PROCESS_TEXT_BLOCK") {
       console.log("[bg info] PROCESS_TEXT_BLOCK message received")
-      const { textBlock, numSentences, userLevel, promptInstruction, customPromptTemplate } = message;
+      const { textBlock, numSentences, userLevel, promptInstruction, customPromptTemplate, originalIndex } = message;
+      console.log("[bg info] Text block:", textBlock);
+      console.log("[bg info] User level:", userLevel);
+      console.log("[bg info] Prompt instruction:", promptInstruction);
       
       // Handle async operation properly
       (async () => {
@@ -54,17 +57,22 @@ chrome.runtime.onMessage.addListener(
           const difficultyPrompt = await getPromptForDifficulty(userLevel);
 
           const backendUrl = `${SERVER_URL}/process_text`;
+          const requestBody = {
+            userId: userId,
+            text: textBlock,
+            numSentences: numSentences,
+            userLevel: userLevel,
+            promptInstruction: difficultyPrompt,
+            customPromptTemplate: customPromptTemplate,
+            originalIndex: originalIndex || 0
+          };
+          console.log("[bg info] Sending request to backend:", backendUrl);
+          console.log("[bg info] Request body:", requestBody);
+          
           const response = await fetch(backendUrl, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              userId: userId,
-              text: textBlock,
-              numSentences: numSentences,
-              userLevel: userLevel,
-              promptInstruction: difficultyPrompt,
-              customPromptTemplate: customPromptTemplate
-            })
+            body: JSON.stringify(requestBody)
           });
 
           if (!response.ok) {
@@ -74,6 +82,7 @@ chrome.runtime.onMessage.addListener(
           }
 
           const data = await response.json();
+          console.log("[bg info] Backend response data:", data);
           sendResponse(data);
         } catch (err) {
           console.error("[bg] Error in PROCESS_TEXT_BLOCK:", err);

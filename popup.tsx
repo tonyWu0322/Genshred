@@ -76,7 +76,7 @@ function Popup() {
         STORAGE_KEYS.DIFFICULTY_MAPPING,
         'genShredDifficultyMapping', // Load difficulty mappings
         'genShredCustomPrompts', // Load custom prompts
-        'genShredManualSelect', // Load manual select state
+        STORAGE_KEYS.MANUAL_SELECT, // Load manual select state
         STORAGE_KEYS.DARK_MODE, // Load dark mode state
         STORAGE_KEYS.READING_MODE // Load reading mode state
       ]);
@@ -86,7 +86,7 @@ function Popup() {
       setSentencesToRewrite(storedSettings[STORAGE_KEYS.SENTENCE_COUNT] ?? DEFAULT_SETTINGS[STORAGE_KEYS.SENTENCE_COUNT]);
       setDifficulty(String(storedSettings[STORAGE_KEYS.DIFFICULTY_LEVEL] ?? DEFAULT_SETTINGS[STORAGE_KEYS.DIFFICULTY_LEVEL]));
       // NEW: Load manual select state
-      setManualSelect(storedSettings['genShredManualSelect'] ?? false);
+      setManualSelect(storedSettings[STORAGE_KEYS.MANUAL_SELECT] ?? false);
       // NEW: Load dark mode state
       setDarkMode(storedSettings[STORAGE_KEYS.DARK_MODE] ?? DEFAULT_SETTINGS[STORAGE_KEYS.DARK_MODE]);
       // NEW: Load reading mode state

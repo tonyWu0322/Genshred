@@ -256,6 +256,8 @@ async function processElement(element: HTMLElement) {
                     );
                 });
                 if (result?.rewritten_sentences?.[0]) {
+                    console.log("Default rewrite - Original:", sentence);
+                    console.log("Default rewrite - Rewritten:", result.rewritten_sentences[0].rewritten_text);
                     applySingleRewriteToElement(element, sentence, result.rewritten_sentences[0].rewritten_text, startIndex, textNodeMappings);
                 }
                 processedCount++;
@@ -295,7 +297,8 @@ const STORAGE_KEYS = {
     DIFFICULTY_LEVEL: 'genShredDifficultyLevel',
     CUSTOM_PROMPT: 'genShredCustomPromptTemplate', // Assuming you'll add this later
     DARK_MODE: 'genShredDarkMode', // Added for dark mode toggle
-    READING_MODE: 'genShredReadingMode' // Added for reading mode
+    READING_MODE: 'genShredReadingMode', // Added for reading mode
+    MANUAL_SELECT: 'genShredManualSelect' // Added for manual select mode
 };
 
 // NEW: Use the consistent default for CUSTOM_PROMPT
@@ -306,6 +309,7 @@ const DEFAULT_SETTINGS = {
   [STORAGE_KEYS.DIFFICULTY_LEVEL]: 'Normal',
   [STORAGE_KEYS.DARK_MODE]: false, // Default to light mode
   [STORAGE_KEYS.READING_MODE]: false, // Default to normal mode
+  [STORAGE_KEYS.MANUAL_SELECT]: true, // Default to enabled manual select mode
 //   [STORAGE_KEYS.CUSTOM_PROMPT]: CUSTOM_PROMPT_DEFAULT // Use the consistent default
 };
 
@@ -521,7 +525,9 @@ async function loadSettings() {
     // NEW: Update custom prompts
     currentCustomPrompts = storedSettings['genShredCustomPrompts'] ?? [];
     // NEW: Load manual select mode state
-    manualSelectModeEnabled = storedSettings['genShredManualSelect'] ?? false;
+    manualSelectModeEnabled = storedSettings[STORAGE_KEYS.MANUAL_SELECT] ?? DEFAULT_SETTINGS[STORAGE_KEYS.MANUAL_SELECT];
+    // 调试：强制启用手动选择模式
+    manualSelectModeEnabled = true;
     // NEW: Load dark mode state
     darkModeEnabled = storedSettings[STORAGE_KEYS.DARK_MODE] ?? DEFAULT_SETTINGS[STORAGE_KEYS.DARK_MODE];
     // NEW: Load reading mode state
@@ -594,7 +600,7 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
                 console.log(`Custom prompts updated:`, currentCustomPrompts);
             }
             // NEW: Handle manual select mode storage change
-            else if (key === 'genShredManualSelect') {
+            else if (key === STORAGE_KEYS.MANUAL_SELECT) {
                 manualSelectModeEnabled = changes[key].newValue;
                 console.log(`Manual select mode changed to: ${manualSelectModeEnabled}`);
                 // No need to re-process paragraphs here, as it's a mode toggle
@@ -1099,7 +1105,7 @@ function restoreOriginalText() {
 }
 
 // Listen for messages from the popup or background script
-chrome.runtime.onMessage.addListener((message, _sender, _sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // NEW: Handle syncing all settings from popup on load (update to also sync mappings)
     if (message.type === "SYNC_SETTINGS") {
         console.log("Content script received SYNC_SETTINGS message.");
@@ -1147,6 +1153,17 @@ chrome.runtime.onMessage.addListener((message, _sender, _sendResponse) => {
         restoreOriginalText();
         if (currentSettings[STORAGE_KEYS.IS_ON]) {
             processParagraphs();
+        }
+        return false;
+    }
+
+    // NEW: Handle SET_MANUAL_SELECT_MODE message from popup
+    if (message.type === "SET_MANUAL_SELECT_MODE") {
+        manualSelectModeEnabled = message.enabled;
+        console.log(`Manual select mode changed to: ${manualSelectModeEnabled}`);
+        // Hide rewrite button if manual select mode is disabled
+        if (!manualSelectModeEnabled) {
+            hideRewriteButton();
         }
         return false;
     }
@@ -1211,75 +1228,212 @@ function showRewriteButton(x: number, y: number) {
         rewriteButton = document.createElement('button');
         rewriteButton.textContent = 'Rewrite Selected';
         rewriteButton.className = 'genshred-rewrite-button';
-        rewriteButton.addEventListener('click', handleRewriteSelectedText);
+        rewriteButton.addEventListener('mousedown', (e) => {
+            e.stopPropagation();
+        });
+        rewriteButton.addEventListener('click', (e) => {
+            e.stopPropagation();
+            console.log('按钮被点击');
+            handleRewriteSelectedText();
+        });
         document.body.appendChild(rewriteButton);
     }
     rewriteButton.style.display = 'block';
+    rewriteButton.style.position = 'absolute';
     rewriteButton.style.left = `${x}px`;
     rewriteButton.style.top = `${y}px`;
+    rewriteButton.style.zIndex = '2147483647';
 }
 
 function hideRewriteButton() {
     if (rewriteButton) {
         rewriteButton.style.display = 'none';
     }
-    currentSelectionRange = null; // Clear selection range when button is hidden
+    currentSelectionRange = null;
 }
 
 async function handleRewriteSelectedText() {
-    if (!currentSelectionRange) return;
+    console.log("handleRewriteSelectedText function started."); // Add this line
+    if (!currentSelectionRange) {
+        console.log("handleRewriteSelectedText: No currentSelectionRange, returning."); // More specific log
+        return;
+    }
 
     const selectedText = currentSelectionRange.toString().trim();
-    if (selectedText.length === 0) return;
+    if (selectedText.length === 0) {
+        console.log("handleRewriteSelectedText: Selected text is empty, returning."); // More specific log
+        return;
+    }
 
     console.log("Rewriting selected text:", selectedText);
-    hideRewriteButton(); // Hide button immediately
+    // hideRewriteButton(); // Hide button immediately - REMOVED to prevent immediate disappearance after click
 
-    // You might want to show a loading spinner here
-    // For now, let's send it to the background script
+    // Get the last known position of the button before it's hidden or moved
+    // We'll use this if we need to re-show the button after an error without a new selection
+    const lastButtonX = rewriteButton ? parseFloat(rewriteButton.style.left) : 0;
+    const lastButtonY = rewriteButton ? parseFloat(rewriteButton.style.top) : 0;
+
+    // 显示加载状态 - 在选中的文本位置显示一个临时的加载指示器
+    // 移除加载动画相关代码
+    // const loadingSpan = document.createElement('span');
+    // loadingSpan.className = 'genshred-loading-spinner';
+    // loadingSpan.textContent = '改写中...';
+    // loadingSpan.style.cssText = `
+    //     background-color: #f0f8ff;
+    //     padding: 2px 4px;
+    //     border-radius: 3px;
+    //     font-style: italic;
+    //     color: #666;
+    //     border: 1px solid #ccc;
+    // `;
+    // currentSelectionRange.deleteContents();
+    // currentSelectionRange.insertNode(loadingSpan);
+
     try {
         const selectedDifficulty = currentSettings[STORAGE_KEYS.DIFFICULTY_LEVEL] as string;
-        // const effectivePromptInstruction = currentDifficultyMappings[selectedDifficulty] || "";
-        // If selected difficulty is a custom prompt, get its instruction from currentCustomPrompts
         const detectedlanguage = franc(selectedText);
         if (detectedlanguage === 'und') {
-            console.log("Undetected language, skipping.");
+            console.log("Manual rewrite - Undetected language, skipping.");
             return;
         }
+        
         const effectivePromptInstruction = await getPromptForDifficultyAndLanguage(selectedDifficulty, detectedlanguage);
-        const customPrompt = currentCustomPrompts.find(cp => cp.id === selectedDifficulty);
-        const finalPromptInstruction = effectivePromptInstruction;
+        const effectiveCustomPromptTemplate = currentSettings[STORAGE_KEYS.CUSTOM_PROMPT];
+        
+        // 2. 将原句显示在console上，以及其他发送前的提示
+        console.log("Manual rewrite - Original sentence being sent:", selectedText);
+        console.log("Manual rewrite - Using prompt instruction:", effectivePromptInstruction);
+        console.log("Manual rewrite - Selected difficulty:", selectedDifficulty);
+        console.log("Manual rewrite - Detected language:", detectedlanguage);
 
-        const response = await chrome.runtime.sendMessage({
-            type: "PROCESS_TEXT_BLOCK",
-            textBlock: selectedText,
-            numSentences: 1, // Always rewrite as a single block for manual selection
-            promptInstruction: finalPromptInstruction,
-            customPromptTemplate: customPrompt?.prompt || "", // Pass custom prompt if applicable
-            userLevel: selectedDifficulty,
+        // 发送纯文本到后端进行改写，与正常改写功能保持一致的格式
+        const result = await new Promise<ProcessResponse>((resolve) => {
+            let promptToUse = effectivePromptInstruction;
+            chrome.runtime.sendMessage(
+                {
+                    type: "PROCESS_TEXT_BLOCK",
+                    textBlock: selectedText,
+                    numSentences: 1,
+                    promptInstruction: promptToUse,
+                    customPromptTemplate: effectiveCustomPromptTemplate,
+                    userLevel: selectedDifficulty,
+                    originalIndex: 0
+                },
+                (response) => resolve(response)
+            );
         });
 
-        if (response?.rewritten_sentences?.[0]) {
-            const rewrittenText = response.rewritten_sentences[0].rewritten_text;
-            console.log("Rewritten text:", rewrittenText);
-            // Replace the selected text in the DOM
-            // This is a simplified replacement. A more robust solution might involve DOM range manipulation.
-            replaceSelectionWithRewrittenText(currentSelectionRange, rewrittenText, selectedText);
-        } else if (response?.error) {
-            console.error("Error rewriting selected text:", response.error);
-            alert(`Error rewriting text: ${response.error}`);
+        // 3. 发送给后端后提示已发送
+        console.log("Manual rewrite - Sentence sent to backend.");
+
+        // 4. 后端传回结果句子后，打印在console上
+        console.log("Manual rewrite - Full response from backend:", result);
+        
+        if (result?.rewritten_sentences?.[0]) {
+            const rewrittenText = result.rewritten_sentences[0].rewritten_text;
+            console.log("Manual rewrite - Rewritten text received:", rewrittenText);
+            
+            // 移除加载指示器
+            // if (loadingSpan.parentNode) { loadingSpan.parentNode.removeChild(loadingSpan); }
+            
+            // 重新创建选择范围并应用改写
+            const newRange = document.createRange();
+            newRange.setStart(currentSelectionRange.startContainer, currentSelectionRange.startOffset);
+            newRange.setEnd(currentSelectionRange.endContainer, currentSelectionRange.endOffset);
+            
+            // 使用与正常改写相同的处理方式
+            replaceSelectionWithRewrittenText(newRange, rewrittenText, selectedText);
+            // After successful rewrite, re-evaluate button visibility based on current selection
+            const selection = window.getSelection();
+            if (selection && selection.toString().trim().length > 0) {
+                // If there's still a selection, keep the button visible at the new selection
+                const range = selection.getRangeAt(0);
+                const rect = range.getBoundingClientRect();
+                showRewriteButton(rect.right + window.scrollX + 5, rect.top + window.scrollY);
+            } else {
+                hideRewriteButton(); // If no selection, hide the button
+            }
+        } else if (result?.error) {
+            console.error("Error rewriting selected text:", result.error);
+            
+            // 移除加载指示器并恢复原文本
+            // if (loadingSpan.parentNode) { loadingSpan.parentNode.removeChild(loadingSpan); }
+            
+            // 重新插入原文本
+            const newRange = document.createRange();
+            newRange.setStart(currentSelectionRange.startContainer, currentSelectionRange.startOffset);
+            newRange.setEnd(currentSelectionRange.endContainer, currentSelectionRange.endOffset);
+            newRange.insertNode(document.createTextNode(selectedText));
+            
+            alert(`Error rewriting text: ${result.error}`);
+            // After error, re-evaluate button visibility based on current selection
+            const selection = window.getSelection();
+            if (selection && selection.toString().trim().length > 0) {
+                const range = selection.getRangeAt(0);
+                const rect = range.getBoundingClientRect();
+                showRewriteButton(rect.right + window.scrollX + 5, rect.top + window.scrollY);
+            } else {
+                // If no selection, or if an error occurred and no selection is active, hide the button
+                hideRewriteButton();
+            }
         } else {
             console.warn("No rewritten text received.");
+            
+            // 移除加载指示器并恢复原文本
+            // if (loadingSpan.parentNode) { loadingSpan.parentNode.removeChild(loadingSpan); }
+            
+            // 重新插入原文本
+            const newRange = document.createRange();
+            newRange.setStart(currentSelectionRange.startContainer, currentSelectionRange.startOffset);
+            newRange.setEnd(currentSelectionRange.endContainer, currentSelectionRange.endOffset);
+            newRange.insertNode(document.createTextNode(selectedText));
+            
             alert("Could not rewrite text. No response from AI.");
+            // After error, re-evaluate button visibility based on current selection
+            const selection = window.getSelection();
+            if (selection && selection.toString().trim().length > 0) {
+                const range = selection.getRangeAt(0);
+                const rect = range.getBoundingClientRect();
+                showRewriteButton(rect.right + window.scrollX + 5, rect.top + window.scrollY);
+            } else {
+                hideRewriteButton();
+            }
         }
     } catch (error) {
         console.error("Error during manual text rewrite:", error);
+        
+        // 移除加载指示器并恢复原文本
+        // if (loadingSpan.parentNode) { loadingSpan.parentNode.removeChild(loadingSpan); }
+        
+        // 重新插入原文本
+        const newRange = document.createRange();
+        newRange.setStart(currentSelectionRange.startContainer, currentSelectionRange.startOffset);
+        newRange.setEnd(currentSelectionRange.endContainer, currentSelectionRange.endOffset);
+        newRange.insertNode(document.createTextNode(selectedText));
+        
         alert("An unexpected error occurred during rewriting.");
+        // After error, re-evaluate button visibility based on current selection
+        const selection = window.getSelection();
+        if (selection && selection.toString().trim().length > 0) {
+            const range = selection.getRangeAt(0);
+            const rect = range.getBoundingClientRect();
+            showRewriteButton(rect.right + window.scrollX + 5, rect.top + window.scrollY);
+        } else {
+            hideRewriteButton();
+        }
     }
 }
 
 function handleTextSelection(event: MouseEvent) {
+    console.log("handleTextSelection called, manualSelectModeEnabled:", manualSelectModeEnabled);
+    
+    // Ensure that currentSelectionRange is always set to the actual selection if manualSelectModeEnabled
     const selection = window.getSelection();
+    console.log("Selection:", selection, "rangeCount:", selection?.rangeCount, "isCollapsed:", selection?.isCollapsed, "manualSelectModeEnabled:", manualSelectModeEnabled);
+
+    // Retrieve MAX_PARAGRAPH_LENGTH from config or define it if not present
+    const MAX_PARAGRAPH_LENGTH = 1000; // Define a reasonable max length for selected text
+
     if (manualSelectModeEnabled && selection && selection.rangeCount > 0 && !selection.isCollapsed) {
         const range = selection.getRangeAt(0);
         const selectedText = range.toString().trim();
@@ -1289,8 +1443,9 @@ function handleTextSelection(event: MouseEvent) {
             !range.commonAncestorContainer.parentElement?.closest('.genshred-rewrite-container') &&
             !range.commonAncestorContainer.parentElement?.closest('.genshred-tooltip-container'))
         {
-            currentSelectionRange = range; // Store the range
+            currentSelectionRange = range;
             const rect = range.getBoundingClientRect();
+            // Position the button near the selected text
             showRewriteButton(rect.right + window.scrollX + 5, rect.top + window.scrollY);
         } else {
             hideRewriteButton();
@@ -1302,50 +1457,14 @@ function handleTextSelection(event: MouseEvent) {
 
 // NEW: Function to replace selected text in DOM with rewritten text
 function replaceSelectionWithRewrittenText(range: Range, rewrittenText: string, originalText: string) {
-    // Create a new span element for the rewritten text
-    const rewrittenSpan = document.createElement('span');
-    rewrittenSpan.className = 'genshred-rewritten';
-    // Apply dark mode styling if enabled
-    if (darkModeEnabled) {
-        rewrittenSpan.classList.add('genshred-dark-mode');
-    }
-    rewrittenSpan.textContent = rewrittenText;
+    // 使用与正常改写功能完全相同的createRewriteSpan函数
+    const containerSpan = createRewriteSpan(originalText, rewrittenText);
 
-    // Create a hidden span for the original text
-    const originalHiddenSpan = document.createElement('span');
-    originalHiddenSpan.className = 'genshred-original-hidden';
-    originalHiddenSpan.textContent = originalText;
-
-    // Create a container for both (for toggling and tooltip)
-    const containerSpan = document.createElement('span');
-    containerSpan.className = 'genshred-rewrite-container';
-    containerSpan.setAttribute('data-original-text', originalText);
-    containerSpan.appendChild(rewrittenSpan);
-    containerSpan.appendChild(originalHiddenSpan);
-
-    // Add event listeners for toggling and tooltip
-    containerSpan.addEventListener('mouseover', (e) => {
-        showTooltip(originalText, e as MouseEvent, containerSpan);
-    });
-    containerSpan.addEventListener('mouseout', () => {
-        hideTooltip();
-    });
-    containerSpan.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (rewrittenSpan.style.display !== 'none') {
-            rewrittenSpan.style.display = 'none';
-            originalHiddenSpan.style.display = 'inline';
-        } else {
-            rewrittenSpan.style.display = 'inline';
-            originalHiddenSpan.style.display = 'none';
-        }
-    });
-
-    // Delete the currently selected content and insert the new container
+    // 删除当前选中的内容并插入新的容器
     range.deleteContents();
     range.insertNode(containerSpan);
 
-    // Clear selection after replacement
+    // 清除选择
     const selection = window.getSelection();
     if (selection) {
         selection.removeAllRanges();
