@@ -239,6 +239,9 @@ async function processElement(element: HTMLElement) {
         // Process each selected sentence separately and apply as soon as result is ready
         let processedCount = 0;
         for (const { sentence, index, startIndex } of selectedSentences) {
+            // 先插入 loading 效果
+            const loadingSpan = createLoadingSpan(sentence);
+            applySingleRewriteToElement(element, sentence, '', startIndex, textNodeMappings, loadingSpan);
             (async () => {
                 const result = await new Promise<ProcessResponse>((resolve) => {
                     let promptToUse = effectivePromptInstruction;
@@ -256,12 +259,16 @@ async function processElement(element: HTMLElement) {
                     );
                 });
                 if (result?.rewritten_sentences?.[0]) {
-                    console.log("Default rewrite - Original:", sentence);
-                    console.log("Default rewrite - Rewritten:", result.rewritten_sentences[0].rewritten_text);
-                    applySingleRewriteToElement(element, sentence, result.rewritten_sentences[0].rewritten_text, startIndex, textNodeMappings);
+                    // 替换 loading 效果为最终改写内容
+                    const rewriteSpan = createRewriteSpan(sentence, result.rewritten_sentences[0].rewritten_text);
+                    if (loadingSpan.parentNode) {
+                        loadingSpan.parentNode.replaceChild(rewriteSpan, loadingSpan);
+                    } else {
+                        // fallback: 直接用 applySingleRewriteToElement
+                        applySingleRewriteToElement(element, sentence, result.rewritten_sentences[0].rewritten_text, startIndex, textNodeMappings);
+                    }
                 }
                 processedCount++;
-                // When all rewrites are done, mark as processed
                 if (processedCount === selectedSentences.length) {
                     element.classList.add('genshred-processed');
                     element.classList.remove('genshred-processing');
@@ -418,6 +425,20 @@ function createLoadingSpinner(): HTMLElement {
     spinner.className = 'genshred-loading-spinner';
     spinner.title = 'Processing...'; // Tooltip for accessibility
     return spinner;
+}
+
+// 1. 新增 createLoadingSpan 工具函数
+function createLoadingSpan(sentence: string): HTMLElement {
+    const wrapper = document.createElement('span');
+    wrapper.className = 'genshred-original-text-wrapper loading';
+    const textSpan = document.createElement('span');
+    textSpan.className = 'original-text';
+    textSpan.textContent = sentence;
+    const spinner = document.createElement('span');
+    spinner.className = 'genshred-loading-spinner';
+    wrapper.appendChild(textSpan);
+    wrapper.appendChild(spinner);
+    return wrapper;
 }
 
 // 添加防抖函数，避免频繁处理
@@ -1273,21 +1294,11 @@ async function handleRewriteSelectedText() {
     const lastButtonX = rewriteButton ? parseFloat(rewriteButton.style.left) : 0;
     const lastButtonY = rewriteButton ? parseFloat(rewriteButton.style.top) : 0;
 
-    // 显示加载状态 - 在选中的文本位置显示一个临时的加载指示器
-    // 移除加载动画相关代码
-    // const loadingSpan = document.createElement('span');
-    // loadingSpan.className = 'genshred-loading-spinner';
-    // loadingSpan.textContent = '改写中...';
-    // loadingSpan.style.cssText = `
-    //     background-color: #f0f8ff;
-    //     padding: 2px 4px;
-    //     border-radius: 3px;
-    //     font-style: italic;
-    //     color: #666;
-    //     border: 1px solid #ccc;
-    // `;
-    // currentSelectionRange.deleteContents();
-    // currentSelectionRange.insertNode(loadingSpan);
+    // 发送请求前，先用 loading 动画替换选区
+    const loadingSpan = createLoadingSpan(selectedText);
+    const range = currentSelectionRange;
+    range.deleteContents();
+    range.insertNode(loadingSpan);
 
     try {
         const selectedDifficulty = currentSettings[STORAGE_KEYS.DIFFICULTY_LEVEL] as string;
@@ -1296,17 +1307,12 @@ async function handleRewriteSelectedText() {
             console.log("Manual rewrite - Undetected language, skipping.");
             return;
         }
-        
         const effectivePromptInstruction = await getPromptForDifficultyAndLanguage(selectedDifficulty, detectedlanguage);
         const effectiveCustomPromptTemplate = currentSettings[STORAGE_KEYS.CUSTOM_PROMPT];
-        
-        // 2. 将原句显示在console上，以及其他发送前的提示
         console.log("Manual rewrite - Original sentence being sent:", selectedText);
         console.log("Manual rewrite - Using prompt instruction:", effectivePromptInstruction);
         console.log("Manual rewrite - Selected difficulty:", selectedDifficulty);
         console.log("Manual rewrite - Detected language:", detectedlanguage);
-
-        // 发送纯文本到后端进行改写，与正常改写功能保持一致的格式
         const result = await new Promise<ProcessResponse>((resolve) => {
             let promptToUse = effectivePromptInstruction;
             chrome.runtime.sendMessage(
@@ -1322,49 +1328,30 @@ async function handleRewriteSelectedText() {
                 (response) => resolve(response)
             );
         });
-
-        // 3. 发送给后端后提示已发送
         console.log("Manual rewrite - Sentence sent to backend.");
-
-        // 4. 后端传回结果句子后，打印在console上
         console.log("Manual rewrite - Full response from backend:", result);
-        
         if (result?.rewritten_sentences?.[0]) {
             const rewrittenText = result.rewritten_sentences[0].rewritten_text;
             console.log("Manual rewrite - Rewritten text received:", rewrittenText);
-            
-            // 移除加载指示器
-            // if (loadingSpan.parentNode) { loadingSpan.parentNode.removeChild(loadingSpan); }
-            
-            // 重新创建选择范围并应用改写
-            const newRange = document.createRange();
-            newRange.setStart(currentSelectionRange.startContainer, currentSelectionRange.startOffset);
-            newRange.setEnd(currentSelectionRange.endContainer, currentSelectionRange.endOffset);
-            
-            // 使用与正常改写相同的处理方式
-            replaceSelectionWithRewrittenText(newRange, rewrittenText, selectedText);
+            // 替换 loading 动画为最终改写内容
+            if (loadingSpan.parentNode) {
+                loadingSpan.parentNode.replaceChild(createRewriteSpan(selectedText, rewrittenText), loadingSpan);
+            }
             // After successful rewrite, re-evaluate button visibility based on current selection
             const selection = window.getSelection();
             if (selection && selection.toString().trim().length > 0) {
-                // If there's still a selection, keep the button visible at the new selection
                 const range = selection.getRangeAt(0);
                 const rect = range.getBoundingClientRect();
                 showRewriteButton(rect.right + window.scrollX + 5, rect.top + window.scrollY);
             } else {
-                hideRewriteButton(); // If no selection, hide the button
+                hideRewriteButton();
             }
         } else if (result?.error) {
             console.error("Error rewriting selected text:", result.error);
-            
-            // 移除加载指示器并恢复原文本
-            // if (loadingSpan.parentNode) { loadingSpan.parentNode.removeChild(loadingSpan); }
-            
             // 重新插入原文本
-            const newRange = document.createRange();
-            newRange.setStart(currentSelectionRange.startContainer, currentSelectionRange.startOffset);
-            newRange.setEnd(currentSelectionRange.endContainer, currentSelectionRange.endOffset);
-            newRange.insertNode(document.createTextNode(selectedText));
-            
+            if (loadingSpan.parentNode) {
+                loadingSpan.parentNode.replaceChild(document.createTextNode(selectedText), loadingSpan);
+            }
             alert(`Error rewriting text: ${result.error}`);
             // After error, re-evaluate button visibility based on current selection
             const selection = window.getSelection();
@@ -1373,21 +1360,14 @@ async function handleRewriteSelectedText() {
                 const rect = range.getBoundingClientRect();
                 showRewriteButton(rect.right + window.scrollX + 5, rect.top + window.scrollY);
             } else {
-                // If no selection, or if an error occurred and no selection is active, hide the button
                 hideRewriteButton();
             }
         } else {
             console.warn("No rewritten text received.");
-            
-            // 移除加载指示器并恢复原文本
-            // if (loadingSpan.parentNode) { loadingSpan.parentNode.removeChild(loadingSpan); }
-            
             // 重新插入原文本
-            const newRange = document.createRange();
-            newRange.setStart(currentSelectionRange.startContainer, currentSelectionRange.startOffset);
-            newRange.setEnd(currentSelectionRange.endContainer, currentSelectionRange.endOffset);
-            newRange.insertNode(document.createTextNode(selectedText));
-            
+            if (loadingSpan.parentNode) {
+                loadingSpan.parentNode.replaceChild(document.createTextNode(selectedText), loadingSpan);
+            }
             alert("Could not rewrite text. No response from AI.");
             // After error, re-evaluate button visibility based on current selection
             const selection = window.getSelection();
@@ -1401,16 +1381,10 @@ async function handleRewriteSelectedText() {
         }
     } catch (error) {
         console.error("Error during manual text rewrite:", error);
-        
-        // 移除加载指示器并恢复原文本
-        // if (loadingSpan.parentNode) { loadingSpan.parentNode.removeChild(loadingSpan); }
-        
         // 重新插入原文本
-        const newRange = document.createRange();
-        newRange.setStart(currentSelectionRange.startContainer, currentSelectionRange.startOffset);
-        newRange.setEnd(currentSelectionRange.endContainer, currentSelectionRange.endOffset);
-        newRange.insertNode(document.createTextNode(selectedText));
-        
+        if (loadingSpan.parentNode) {
+            loadingSpan.parentNode.replaceChild(document.createTextNode(selectedText), loadingSpan);
+        }
         alert("An unexpected error occurred during rewriting.");
         // After error, re-evaluate button visibility based on current selection
         const selection = window.getSelection();
@@ -1486,8 +1460,9 @@ function applySingleRewriteToElement(
     element: HTMLElement,
     originalText: string,
     rewrittenText: string,
-    startIndex: number, // no longer used, but kept for signature compatibility
-    textNodeMappings: Array<{ node: Text, start: number, end: number }> // no longer used
+    startIndex: number,
+    textNodeMappings: Array<{ node: Text, start: number, end: number }>,
+    loadingSpan?: HTMLElement // 新增参数
 ) {
     // Helper: Recursively search for the first text node containing the target text, skipping rewritten spans
     function findTextNodeWithSentence(node: Node, sentence: string): { textNode: Text, offset: number } | null {
@@ -1522,10 +1497,15 @@ function applySingleRewriteToElement(
     range.setStart(textNode, offset);
     range.setEnd(textNode, offset + originalText.length);
     // Create the rewrite span
-    const rewriteSpan = createRewriteSpan(originalText, rewrittenText);
+    let nodeToInsert;
+    if (loadingSpan) {
+        nodeToInsert = loadingSpan;
+    } else {
+        nodeToInsert = createRewriteSpan(originalText, rewrittenText);
+    }
     // Replace the range with the rewrite span
     range.deleteContents();
-    range.insertNode(rewriteSpan);
+    range.insertNode(nodeToInsert);
     // Clean up selection
     range.detach();
 }
