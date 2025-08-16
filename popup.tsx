@@ -313,6 +313,14 @@ const handleReadingModeToggle = async () => {
         }
     });
 };
+
+// 新增刷新 customPrompts 的函数
+const refreshCustomPrompts = async () => {
+  const stored = await chrome.storage.local.get(['genShredCustomPrompts']);
+  if (stored['genShredCustomPrompts']) {
+    setCustomPrompts(stored['genShredCustomPrompts']);
+  }
+};
   return (
     <div className="popup-container">
       <header className="popup-header">
@@ -459,6 +467,7 @@ const handleReadingModeToggle = async () => {
         <PromptSettingsModal 
           isOpen={isModalOpen} 
           onClose={() => setIsModalOpen(false)} 
+          onSave={refreshCustomPrompts} // 新增
         />
     </div>
   );

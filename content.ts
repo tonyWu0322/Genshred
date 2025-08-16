@@ -265,7 +265,7 @@ async function processElement(element: HTMLElement) {
                         loadingSpan.parentNode.replaceChild(rewriteSpan, loadingSpan);
                     } else {
                         // fallback: 直接用 applySingleRewriteToElement
-                        applySingleRewriteToElement(element, sentence, result.rewritten_sentences[0].rewritten_text, startIndex, textNodeMappings);
+                    applySingleRewriteToElement(element, sentence, result.rewritten_sentences[0].rewritten_text, startIndex, textNodeMappings);
                     }
                 }
                 processedCount++;
@@ -1407,7 +1407,7 @@ function handleTextSelection(event: MouseEvent) {
 
     // Retrieve MAX_PARAGRAPH_LENGTH from config or define it if not present
     const MAX_PARAGRAPH_LENGTH = 1000; // Define a reasonable max length for selected text
-
+    
     if (manualSelectModeEnabled && selection && selection.rangeCount > 0 && !selection.isCollapsed) {
         const range = selection.getRangeAt(0);
         const selectedText = range.toString().trim();

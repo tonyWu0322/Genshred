@@ -4,9 +4,10 @@ import './PromptSettingsModal.css';
 interface PromptSettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onSave?: () => void; // 新增
 }
 
-const PromptSettingsModal: React.FC<PromptSettingsModalProps> = ({ isOpen, onClose }) => {
+const PromptSettingsModal: React.FC<PromptSettingsModalProps> = ({ isOpen, onClose, onSave }) => {
   const [difficultyMapping, setDifficultyMapping] = useState({
     "Easy": "Simplify vocabulary and sentence structure for a beginner (A2 CEFR level).",
     "Normal": "Rewrite for an intermediate English speaker (B2 CEFR level). Use clear and concise language.",
@@ -81,6 +82,7 @@ const PromptSettingsModal: React.FC<PromptSettingsModalProps> = ({ isOpen, onClo
     });
     setStatusMessage('Settings saved!');
     setTimeout(() => setStatusMessage(''), 2000);
+    if (onSave) onSave(); // 新增
   };
 
   const handleReset = async () => {
