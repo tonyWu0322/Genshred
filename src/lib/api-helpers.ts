@@ -4,7 +4,7 @@ import { STORAGE_KEYS } from '../constants';
 import type { ProcessResponse } from '../types';
 import { currentSettings } from './state-management';
 import { MIN_PARAGRAPH_LENGTH,MAX_PARAGRAPH_LENGTH } from '../constants';
-import { sha256,calculateComplexityScore, selectSentences } from './utilities';
+import { sha256,calculateComplexityScore, selectSentences, withTimeout } from './utilities';
 import { createLoadingSpan,createRewriteSpan,applySingleRewriteToElement } from './ui-components';
 import { isElementVisible, getTextNodesWithOffsets,applyRewritesToElement } from './dom-utilities';
 import {franc} from "franc-min";
@@ -15,7 +15,11 @@ export function detectLanguage(text){
 };
 
 async function processElement(element: HTMLElement) {
-    
+    if (element.classList.contains('genshred-processed') || element.classList.contains('genshred-processing')){
+        console.log("Skipping element: Already processed or in-progress.");
+        return;
+    }
+    element.classList.add('genshred-processing')
     console.log("[New Attempt] Attempting to process element:", element.nodeName, element.textContent?.substring(0, 50) + "...");
     try {
         if (!currentSettings[STORAGE_KEYS.IS_ON]) {
@@ -96,7 +100,7 @@ async function processElement(element: HTMLElement) {
         console.log("Processing text block:", textBlock.substring(0, 50) + "...");
 
         // Mark as processing to prevent duplicate processing
-        element.classList.add('genshred-processing');
+        // element.classList.add('genshred-processing');
         const detectedlanguage = detectLanguage(textBlock)
         console.log("Detected language:", detectedlanguage);
         if (detectedlanguage === 'und') {
@@ -184,18 +188,14 @@ async function processElement(element: HTMLElement) {
             numSentencesToRewrite
         );
         console.log(`Selected ${selectedSentences.length} sentences for rewriting:`, selectedSentences);
-
-        // Process each selected sentence separately and apply as soon as result is ready
-        let processedCount = 0;
-        for (const { sentence, index, startIndex } of selectedSentences) {
-            // 先插入 loading 效果
+        const rewritePromises = selectedSentences.map(async({sentence, index, startIndex})=>{
             const loadingSpan = createLoadingSpan(sentence);
             applySingleRewriteToElement(element, sentence, '', startIndex, textNodeMappings, loadingSpan);
-            (async () => {
-                const result = await new Promise<ProcessResponse>((resolve) => {
+
+            try {
+                const result = await withTimeout(new Promise<ProcessResponse>((resolve) => {
                     let promptToUse = effectivePromptInstruction;
-                    chrome.runtime.sendMessage(
-                        {
+                    chrome.runtime.sendMessage({
                             type: "PROCESS_TEXT_BLOCK",
                             textBlock: sentence,
                             numSentences: 1,
@@ -205,30 +205,81 @@ async function processElement(element: HTMLElement) {
                             originalIndex: index
                         },
                         (response) => resolve(response)
-                    );
-                });
+                        );
+                    }),10000);
                 if (result?.rewritten_sentences?.[0]) {
-                    // 替换 loading 效果为最终改写内容
                     const rewriteSpan = createRewriteSpan(sentence, result.rewritten_sentences[0].rewritten_text);
                     if (loadingSpan.parentNode) {
                         loadingSpan.parentNode.replaceChild(rewriteSpan, loadingSpan);
-                    } else {
-                        // fallback: 直接用 applySingleRewriteToElement
-                    applySingleRewriteToElement(element, sentence, result.rewritten_sentences[0].rewritten_text, startIndex, textNodeMappings);
                     }
                 }
-                processedCount++;
-                if (processedCount === selectedSentences.length) {
-                    element.classList.add('genshred-processed');
-                    element.classList.remove('genshred-processing');
+            } catch (error) {
+                console.error("Error rewriting sentence:", error);
+                // The loading spinner will remain, but the outer process can continue.
+                // You could also replace the spinner with the original text here if desired.
+                if (loadingSpan.parentNode) {
+                    loadingSpan.parentNode.replaceChild(document.createTextNode(sentence), loadingSpan);
                 }
-            })();
+            }
+        });
+
+            // Wait for ALL promises to complete (either resolved or rejected)
+            await Promise.allSettled(rewritePromises);
+        } catch (error) {
+            console.error("Error in processElement:", error);
+        } finally {
+            // This block will ALWAYS run after the try or catch block finishes.
+            // It ensures the element's state is reset, regardless of individual sentence failures.
+            element.classList.remove('genshred-processing');
+            element.classList.add('genshred-processed');
         }
-    } catch (error) {
-        console.error("Error in processElement:", error);
-        element.classList.remove('genshred-processing');
     }
-}
+
+//         // Process each selected sentence separately and apply as soon as result is ready
+//         let processedCount = 0;
+//         for (const { sentence, index, startIndex } of selectedSentences) {
+//             // 先插入 loading 效果
+//             const loadingSpan = createLoadingSpan(sentence);
+//             applySingleRewriteToElement(element, sentence, '', startIndex, textNodeMappings, loadingSpan);
+//             (async () => {
+//                 const result = await new Promise<ProcessResponse>((resolve) => {
+//                     let promptToUse = effectivePromptInstruction;
+//                     chrome.runtime.sendMessage(
+//                         {
+//                             type: "PROCESS_TEXT_BLOCK",
+//                             textBlock: sentence,
+//                             numSentences: 1,
+//                             promptInstruction: promptToUse,
+//                             customPromptTemplate: effectiveCustomPromptTemplate,
+//                             userLevel: selectedDifficulty,
+//                             originalIndex: index
+//                         },
+//                         (response) => resolve(response)
+//                     );
+//                 });
+//                 if (result?.rewritten_sentences?.[0]) {
+//                     // 替换 loading 效果为最终改写内容
+//                     const rewriteSpan = createRewriteSpan(sentence, result.rewritten_sentences[0].rewritten_text);
+//                     if (loadingSpan.parentNode) {
+//                         loadingSpan.parentNode.replaceChild(rewriteSpan, loadingSpan);
+//                     } else {
+//                         // fallback: 直接用 applySingleRewriteToElement
+//                     applySingleRewriteToElement(element, sentence, result.rewritten_sentences[0].rewritten_text, startIndex, textNodeMappings);
+//                     }
+//                 }
+//                 processedCount++;
+//                 if (processedCount === selectedSentences.length) {
+//                     element.classList.add('genshred-processed');
+//                     element.classList.remove('genshred-processing');
+//                 }
+//             })();
+//         }
+//     } catch (error) {
+//         console.error("Error in processElement:", error);
+//         element.classList.remove('genshred-processing');
+//         element.classList.add('genshred-processed'); // 尝试应对重复改写
+//     }
+// }
 
 async function getPromptForDifficultyAndLanguage(difficulty: string, language: string): Promise<string> {
     const { genshred_prompt_matrix } = await chrome.storage.local.get('genshred_prompt_matrix');

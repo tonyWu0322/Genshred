@@ -9,27 +9,22 @@ import {convert3To2} from './scripts/language_code_converter';
 
 
 // All from `dom-utilities.ts`
-import { isElementVisible, isElementInViewport, getTextNodesWithOffsets, sentenceSpansMultipleNodes, applyRewritesToElement, updateDarkModeStyling } from './src/lib/dom-utilities';
-
+import { isElementVisible, isElementInViewport, getTextNodesWithOffsets, applyRewritesToElement, updateDarkModeStyling } from './src/lib/dom-utilities';
 // All from `ui-components.ts`
 import { createTooltip, showTooltip, hideTooltip, createLoadingSpan, createRewriteSpan, restoreOriginalText } from './src/lib/ui-components';
-
 // All from `observers.ts`
 import { startObservingDOMChanges, stopObservingDOMChanges, setupIntersectionObserver, processParagraphs } from './src/lib/observers';
-
 // All from `api-helpers.ts`
 import { processElement, getPromptForDifficultyAndLanguage, detectLanguage} from './src/lib/api-helpers';
-
 // All from `utilities.ts`
 import { debounce, escapeRegExp, escapeHTML, calculateComplexityScore, selectSentences, sha256, handleIframes} from './src/lib/utilities';
-
 // All from `constants.ts`
 import { STORAGE_KEYS, DEFAULT_SETTINGS, MIN_PARAGRAPH_LENGTH, MAX_PARAGRAPH_LENGTH, PROCESSING_DELAY } from './src/constants';
-
 // All from `types.ts`
-import type { ProcessResponse } from './src/types';
+import type { ProcessResponse, Settings } from './src/types';
 
-import { currentSettings, loadSettings } from '~src/lib/state-management';
+import { currentSettings, loadSettings, registerSettingsUpdateCallback } from '~src/lib/state-management';
+
 // lazyloading
 let intersectionObserver: IntersectionObserver | null = null;
 const observedElements = new WeakSet<Element>();
@@ -42,12 +37,12 @@ const observedElements = new WeakSet<Element>();
 
 // 加载动画
 // deprecated
-function createLoadingSpinner(): HTMLElement {
-    const spinner = document.createElement('span');
-    spinner.className = 'genshred-loading-spinner';
-    spinner.title = 'Processing...'; // Tooltip for accessibility
-    return spinner;
-}
+// function createLoadingSpinner(): HTMLElement {
+//     const spinner = document.createElement('span');
+//     spinner.className = 'genshred-loading-spinner';
+//     spinner.title = 'Processing...'; // Tooltip for accessibility
+//     return spinner;
+// }
 
 // 添加防抖函数，避免频繁处理
 
@@ -99,69 +94,50 @@ initialize();
 // Function to apply rewrites to an element by manipulating text nodes directly
 
 
+// Callback for setting update
+function handleSettingsUpdate(newSettings: Settings) {
+    console.log("Reacting to settings update:", newSettings);
+
+    // This is where you put all the action logic that used to be in loadSettings and onChanged
+    if (newSettings[STORAGE_KEYS.IS_ON]) {
+        restoreOriginalText();
+        processParagraphs();
+        startObservingDOMChanges();
+    } else {
+        restoreOriginalText();
+        stopObservingDOMChanges();
+    }
+
+    if (newSettings[STORAGE_KEYS.DARK_MODE]) {
+        updateDarkModeStyling();
+    }
+    
+    // You can also handle reading mode and other setting-specific actions here
+    if (newSettings[STORAGE_KEYS.READING_MODE]) {
+        restoreOriginalText();
+        if (newSettings[STORAGE_KEYS.IS_ON]) {
+            processParagraphs();
+        }
+    }
+}
+
+// Call the function to load initial settings, then register the callback to listen for future changes
+loadSettings();
+registerSettingsUpdateCallback(handleSettingsUpdate);
+
 // Listen for messages from the popup or background script
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    // : Handle syncing all settings from popup on load (update to also sync mappings) ==> Moved
-    // if (message.type === "SYNC_SETTINGS") { ==> state-management.ts
-    //     console.log("Content script received SYNC_SETTINGS message.");
-    //     const settings = message.settings;
-    //     currentSettings = { ...currentSettings, ...settings };
-    //     // Also update mappings if they were synced (though storage.onChanged is primary for this)
-    //     // This SYNC_SETTINGS might be expanded if you decide to send mappings from popup.
-    //     console.log("Synced settings:", currentSettings);
-
-    //     restoreOriginalText();
-    //     if (currentSettings[STORAGE_KEYS.IS_ON]) {
-    //         processParagraphs();
+    
+    // All state-related changes are dealt within the popup now
+    // if (message.type === "SET_MANUAL_SELECT_MODE") {
+    //     manualSelectModeEnabled = message.enabled;
+    //     console.log(`Manual select mode changed to: ${manualSelectModeEnabled}`);
+    //     // Hide rewrite button if manual select mode is disabled
+    //     if (!manualSelectModeEnabled) {
+    //         hideRewriteButton();
     //     }
     //     return false;
     // }
-
-    // NEW: Handle SET_DIFFICULTY message from popup, which now sends promptInstruction
-    if (message.type === "SET_DIFFICULTY") {
-        currentSettings[STORAGE_KEYS.DIFFICULTY_LEVEL] = message.difficulty; // Update stored difficulty level
-        // The promptInstruction is now directly sent from popup
-        // We don't need to look it up in currentDifficultyMappings or currentCustomPrompts here
-        // as popup has already determined the correct instruction.
-        console.log(`Difficulty level changed to: ${currentSettings[STORAGE_KEYS.DIFFICULTY_LEVEL]} and prompt instruction updated.`);
-        restoreOriginalText();
-        if (currentSettings[STORAGE_KEYS.IS_ON]) {
-            processParagraphs();
-        }
-        return false;
-    }
-
-    // NEW: Handle SET_DARK_MODE message from popup
-    if (message.type === "SET_DARK_MODE") {
-        darkModeEnabled = message.enabled;
-        console.log(`Dark mode changed to: ${darkModeEnabled}`);
-        // Update existing rewritten elements with new dark mode styling
-        updateDarkModeStyling();
-        return false;
-    }
-
-    // NEW: Handle SET_READING_MODE message from popup
-    if (message.type === "SET_READING_MODE") {
-        readingModeEnabled = message.enabled;
-        console.log(`Reading mode changed to: ${readingModeEnabled}`);
-        // Reprocess the page with new reading mode settings
-        restoreOriginalText();
-        if (currentSettings[STORAGE_KEYS.IS_ON]) {
-            processParagraphs();
-        }
-        return false;
-    }
-
-    // NEW: Handle SET_MANUAL_SELECT_MODE message from popup
-    if (message.type === "SET_MANUAL_SELECT_MODE") {
-        manualSelectModeEnabled = message.enabled;
-        console.log(`Manual select mode changed to: ${manualSelectModeEnabled}`);
-        // Hide rewrite button if manual select mode is disabled
-        if (!manualSelectModeEnabled) {
-            hideRewriteButton();
-        }
-        return false;
-    }
 
     // ... (existing TOGGLE_PLUGIN, SET_REWRITE_COUNT) ...
     // These will mostly be handled by storage.onChanged now.
@@ -235,6 +211,7 @@ function hideRewriteButton() {
     currentSelectionRange = null;
 }
 
+// 手动模式
 async function handleRewriteSelectedText() {
     console.log("handleRewriteSelectedText function started."); // Add this line
     if (!currentSelectionRange) {
