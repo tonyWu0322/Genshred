@@ -26,14 +26,14 @@ async function processElement(element: HTMLElement) {
             console.log("Skipping element: Plugin is OFF.");
             return;
         }
-        if (element.classList.contains('genshred-processed')) {
-            console.log("Skipping element: Already processed.");
-            return;
-        }
-        if (element.classList.contains('genshred-processing')) {
-            console.log("Skipping element: Already processing.");
-            return;
-        }
+        // if (element.classList.contains('genshred-processed')) {
+        //     console.log("Skipping element: Already processed.");
+        //     return;
+        // }
+        // if (element.classList.contains('genshred-processing')) {
+        //     console.log("Skipping element: Already processing.");
+        //     return;
+        // }
         if (element.closest('.genshred-rewrite-container')) {
             console.log("Skipping element: Part of a rewritten block.");
             return;
@@ -195,6 +195,7 @@ async function processElement(element: HTMLElement) {
             try {
                 const result = await withTimeout(new Promise<ProcessResponse>((resolve) => {
                     let promptToUse = effectivePromptInstruction;
+                    console.log("now processing:",sentence)
                     chrome.runtime.sendMessage({
                             type: "PROCESS_TEXT_BLOCK",
                             textBlock: sentence,

@@ -1,3 +1,4 @@
+import { rejects } from "assert";
 import { currentSettings } from "./state-management";
 import { STORAGE_KEYS } from "~src/constants";
 
@@ -96,5 +97,12 @@ function handleIframes() {
     // 设置定期检查新iframe
     setInterval(processIframes, 5000);
 }
-
+// from old crapmountain
 export {debounce, escapeRegExp, escapeHTML, calculateComplexityScore, selectSentences, sha256, handleIframes };
+
+export function withTimeout(promise,ms){
+    const timeout = new Promise((_, reject)=>{
+        setTimeout(()=>reject(new Error('Request timed out')),ms);
+    })
+    return Promise.race([promise, timeout]);
+}
