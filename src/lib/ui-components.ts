@@ -17,7 +17,7 @@ function createTooltip() {
 
 
 // 显示提示框
-function showTooltip(text: string, event: MouseEvent, sourceElement?: Element) {
+function showTooltip(text: string, event: MouseEvent, sourceElement?: HTMLElement) {
     // 如果已经显示了提示框，且是同一个元素触发的，则不做任何操作
     if (isTooltipVisible && sourceElement && activeTooltipElement === sourceElement) {
         return;

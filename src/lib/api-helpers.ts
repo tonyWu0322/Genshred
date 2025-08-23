@@ -6,7 +6,7 @@ import { currentSettings } from './state-management';
 import { MIN_PARAGRAPH_LENGTH,MAX_PARAGRAPH_LENGTH } from '../constants';
 import { sha256,calculateComplexityScore, selectSentences } from './utilities';
 import { createLoadingSpan,createRewriteSpan,applySingleRewriteToElement } from './ui-components';
-import { isElementVisible, getTextNodesWithOffsets,applyRewritesToElement,sentenceSpansMultipleNodes } from './dom-utilities';
+import { isElementVisible, getTextNodesWithOffsets,applyRewritesToElement } from './dom-utilities';
 import {franc} from "franc-min";
 
 export function detectLanguage(text){
@@ -15,6 +15,7 @@ export function detectLanguage(text){
 };
 
 async function processElement(element: HTMLElement) {
+    
     console.log("[New Attempt] Attempting to process element:", element.nodeName, element.textContent?.substring(0, 50) + "...");
     try {
         if (!currentSettings[STORAGE_KEYS.IS_ON]) {
@@ -65,7 +66,18 @@ async function processElement(element: HTMLElement) {
             console.log(`Skipping element with too many child nodes: ${childNodes.length} (max: ${maxChildNodes})`);
             return;
         }
-
+        function sentenceSpansMultipleNodes(sentence: string, textNodeMappings: Array<{ node: Text, start: number, end: number }>): boolean {
+            const sentenceStart = textBlock.indexOf(sentence);
+            const sentenceEnd = sentenceStart + sentence.length;
+            
+            // Find all text nodes that overlap with this sentence
+            const overlappingNodes = textNodeMappings.filter(mapping => 
+                (mapping.start < sentenceEnd && mapping.end > sentenceStart)
+            );
+            
+            // If more than one text node overlaps with the sentence, it spans multiple nodes
+            return overlappingNodes.length > 1;
+            }
         
         const { fullText: textBlock, mappings: textNodeMappings } = getTextNodesWithOffsets(element);
         console.log("Extracted text block from element:", textBlock.substring(0, 200) + "...");
