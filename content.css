@@ -36,7 +36,7 @@
 .genshred-tooltip-container {
     display: none;
     position: fixed;
-    bottom: 10px;
+    bottom: 50px;
     left: 50%;
     transform: translateX(-50%);
     background-color: #333;
@@ -45,7 +45,7 @@
     border-radius: 4px;
     font-size: 14px;
     z-index: 10000; /* Ensure it's always on top */
-    max-width: 80%;
+    max-width: 150%;
     white-space: normal;
     box-shadow: 0 2px 8px rgba(0,0,0,0.2);
     pointer-events: none;
@@ -94,12 +94,12 @@
 /* Hide original text while loading, if preferred */
 .genshred-original-text-wrapper.loading .original-text {
     /* You could hide this or reduce its opacity */
-    opacity: 0.5;
+    opacity: 0.8;
 }
 
 /* Optional: Placeholder for rewritten text while loading */
 .genshred-loading-placeholder {
-    color: #888;
+    /* color: #888; */
     font-style: italic;
     margin-left: 5px;
 }
