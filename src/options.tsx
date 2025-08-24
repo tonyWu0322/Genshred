@@ -1,6 +1,7 @@
 // options.tsx
 import React, { useState, useEffect } from 'react';
-import { STORAGE_KEYS, DEFAULT_SETTINGS } from './popup'; // Re-use constants
+import { STORAGE_KEYS, DEFAULT_SETTINGS } from './constants'
+
 import './options.css';
 // We will not define the default custom prompt here for consistency
 // This prompt will be passed to the backend, so make sure it uses {user_level} and {sentences_to_rewrite}

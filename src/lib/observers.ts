@@ -4,12 +4,39 @@ import { STORAGE_KEYS, MAX_PARAGRAPH_LENGTH,MIN_PARAGRAPH_LENGTH } from '~src/co
 import { currentSettings } from './state-management';
 import { debounce } from './utilities';
 import { isElementVisible,isElementInViewport } from './dom-utilities';
-// 添加MutationObserver来监听DOM变化
+// 添加MutationObserver来监听DOM变化 **注意添加动画后亦会触发**
 let mutationObserver: MutationObserver | null = null;
 // Define the variables here, scoped to this module
 let intersectionObserver: IntersectionObserver | null = null;
 const observedElements = new WeakSet<Element>();
+let isObserving = true;
 let isProcessing = false;
+let elementQueue: HTMLElement[]=[];
+let isProcessingQueue = false;
+// Function to start processing the queue
+async function processQueue() {
+    if (isProcessingQueue) {
+        return;
+    }
+    isProcessingQueue = true;
+
+    while (elementQueue.length > 0) {
+        const element = elementQueue.shift();
+        if (element) {
+            await processElement(element);
+        }
+    }
+    
+    isProcessingQueue = false;
+}
+// In your MutationObserver and IntersectionObserver callbacks:
+// Instead of calling processElement directly, add to the queue.
+function handleFoundElement(element: HTMLElement) {
+    if (!elementQueue.includes(element) && !element.classList.contains('genshred-processed')) {
+        elementQueue.push(element);
+        processQueue(); // Start or continue processing
+    }
+}
 
 function startObservingDOMChanges() {
     if (mutationObserver) {
@@ -21,36 +48,56 @@ function startObservingDOMChanges() {
     
     // 创建MutationObserver实例
     mutationObserver = new MutationObserver((mutations) => {
+        if (isObserving){
+            return;
+        }
         let shouldProcess = false;
         
         // 检查是否有相关变化需要处理
         for (const mutation of mutations) {
-            // 如果添加了新节点
             if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
                 for (const node of Array.from(mutation.addedNodes)) {
-                    // 检查是否是元素节点且不是我们自己创建的
+                    // Check if the added node is a child of an element we're currently processing
                     if (node.nodeType === Node.ELEMENT_NODE && 
-                        !(node as Element).classList.contains('genshred-rewritten') &&
-                        !(node as Element).classList.contains('genshred-processed')) {
-                        shouldProcess = true;
-                        break;
+                        (node as Element).closest('.genshred-processing')) {
+                        // Ignore mutations within a processing element
+                        console.log("Ignoring mutation within a processing element.");
+                        continue;
                     }
+                    // Check if the added node is a root processed/rewritten element
+                    if (node.nodeType === Node.ELEMENT_NODE &&
+                        ((node as Element).classList.contains('genshred-rewritten') ||
+                         (node as Element).classList.contains('genshred-processed') ||
+                         (node as Element).classList.contains('genshred-processing'))) {
+                        console.log("Ignoring mutation on a processed or in-progress element.");
+                        continue;
+                    }
+        
+                    // All other added elements should trigger a process
+                    shouldProcess = true;
+                    break;
                 }
             }
             
-            // 如果修改了属性或字符数据
+            // Original attribute/characterData logic can remain, but be cautious
+            // The `mutation.target` is the element where the change happened.
+            // Ensure you're not re-processing an element that is part of a rewritten block.
             if ((mutation.type === 'attributes' || mutation.type === 'characterData') && 
-                !mutation.target.parentElement?.classList.contains('genshred-rewritten')) {
+                !mutation.target.parentElement?.closest('.genshred-rewrite-container')) {
                 shouldProcess = true;
             }
             
             if (shouldProcess) break;
-        }
+        } ;
         
         // 如果需要处理，调用防抖版本的processParagraphs
         if (shouldProcess && currentSettings[STORAGE_KEYS.IS_ON]) {
             console.log("DOM changes detected, processing new content...");
-            debouncedProcessParagraphs();
+            isObserving=true;
+            (async()=>{
+                await  debouncedProcessParagraphs();
+                isObserving =false;
+            });
         }
     });
     
@@ -96,7 +143,7 @@ function setupIntersectionObserver() {
                 // Process if element is entering viewport
                 if (entry.isIntersecting) {
                     try {
-                        await processElement(element);
+                        await handleFoundElement(element);
                     } catch (error) {
                         console.error("Error processing element:", error);
                         element.classList.remove('genshred-processing');
@@ -198,6 +245,12 @@ async function processParagraphs() {
             if (totalCharCount > 0 && totalCharCount < 50 && (alphabeticCharCount / totalCharCount < 0.3)) {
                 return false;
             }
+            // In observers.ts, inside your element discovery loop:
+            // Check if the potential element to process is inside a container that is already handled
+            if (element.closest('.genshred-processed') || element.closest('.genshred-processing')) {
+                console.log("Skipping element because it is inside an already processed or in-progress container.");
+                return false;
+            }
 
             return true;
         });
@@ -232,7 +285,7 @@ async function processParagraphs() {
                 }
                 
                 try {
-                    await processElement(element);
+                    await handleFoundElement(element);
                 } catch (error) {
                     console.error("Error processing element:", error);
                     element.classList.remove('genshred-processing');

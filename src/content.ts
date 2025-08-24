@@ -2,26 +2,26 @@
 import './content.css';
 import { SERVER_URL } from "./config";
 import { franc } from 'franc-min';
-import AIChatWindow from './components/AIChatWindow';
+import AIChatWindow from '../components/AIChatWindow';
 import React from 'react';
 import * as ReactDOM from 'react-dom';
-import {convert3To2} from './scripts/language_code_converter';
+import {convert3To2} from '../scripts/language_code_converter';
 
 
 // All from `dom-utilities.ts`
-import { isElementVisible, isElementInViewport, getTextNodesWithOffsets, applyRewritesToElement, updateDarkModeStyling } from './src/lib/dom-utilities';
+import { isElementVisible, isElementInViewport, getTextNodesWithOffsets, applyRewritesToElement, updateDarkModeStyling } from './lib/dom-utilities';
 // All from `ui-components.ts`
-import { createTooltip, showTooltip, hideTooltip, createLoadingSpan, createRewriteSpan, restoreOriginalText } from './src/lib/ui-components';
+import { createTooltip, showTooltip, hideTooltip, createLoadingSpan, createRewriteSpan, restoreOriginalText } from './lib/ui-components';
 // All from `observers.ts`
-import { startObservingDOMChanges, stopObservingDOMChanges, setupIntersectionObserver, processParagraphs } from './src/lib/observers';
+import { startObservingDOMChanges, stopObservingDOMChanges, setupIntersectionObserver, processParagraphs } from './lib/observers';
 // All from `api-helpers.ts`
-import { processElement, getPromptForDifficultyAndLanguage, detectLanguage} from './src/lib/api-helpers';
+import { processElement, getPromptForDifficultyAndLanguage, detectLanguage} from './lib/api-helpers';
 // All from `utilities.ts`
-import { debounce, escapeRegExp, escapeHTML, calculateComplexityScore, selectSentences, sha256, handleIframes} from './src/lib/utilities';
+import { debounce, escapeRegExp, escapeHTML, calculateComplexityScore, selectSentences, sha256, handleIframes} from './lib/utilities';
 // All from `constants.ts`
-import { STORAGE_KEYS, DEFAULT_SETTINGS, MIN_PARAGRAPH_LENGTH, MAX_PARAGRAPH_LENGTH, PROCESSING_DELAY } from './src/constants';
+import { STORAGE_KEYS, DEFAULT_SETTINGS, MIN_PARAGRAPH_LENGTH, MAX_PARAGRAPH_LENGTH, PROCESSING_DELAY } from './constants';
 // All from `types.ts`
-import type { ProcessResponse, Settings } from './src/types';
+import type { ProcessResponse, Settings } from './types';
 
 import { currentSettings, loadSettings, registerSettingsUpdateCallback } from '~src/lib/state-management';
 

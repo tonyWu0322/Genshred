@@ -15,12 +15,17 @@ export function detectLanguage(text){
 };
 
 async function processElement(element: HTMLElement) {
+    console.log(element.classList.contains('genshred-processing')? "processing: TTT" : "-ing: FFF");
+    console.log(element.classList.contains('genshred-processed')? "processed: TTT" : "-ed: FFF");
     if (element.classList.contains('genshred-processed') || element.classList.contains('genshred-processing')){
         console.log("Skipping element: Already processed or in-progress.");
         return;
     }
-    element.classList.add('genshred-processing')
+    element.classList.add('genshred-processing');
+    console.log(element.classList.contains('genshred-processing')? "TTT" : "FFF");
     console.log("[New Attempt] Attempting to process element:", element.nodeName, element.textContent?.substring(0, 50) + "...");
+    console.log(element.classList);
+    console.log(114514);
     try {
         if (!currentSettings[STORAGE_KEYS.IS_ON]) {
             console.log("Skipping element: Plugin is OFF.");
@@ -232,6 +237,7 @@ async function processElement(element: HTMLElement) {
             // This block will ALWAYS run after the try or catch block finishes.
             // It ensures the element's state is reset, regardless of individual sentence failures.
             element.classList.remove('genshred-processing');
+            console.log("process complete, add processed to:",element)
             element.classList.add('genshred-processed');
         }
     }

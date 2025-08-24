@@ -1,6 +1,6 @@
 // content.ts
 import './content.css';
-import { SERVER_URL } from "./config";
+import { SERVER_URL } from "./src/config";
 import { franc } from 'franc-min';
 import AIChatWindow from './components/AIChatWindow';
 import React from 'react';

@@ -125,18 +125,7 @@ function getTextNodesWithOffsets(root: Node): { fullText: string, mappings: Arra
 }
 
 // Helper function to check if a sentence spans multiple text nodes
-function sentenceSpansMultipleNodes(sentence: string, textNodeMappings: Array<{ node: Text, start: number, end: number }>): boolean {
-    const sentenceStart = textBlock.indexOf(sentence);
-    const sentenceEnd = sentenceStart + sentence.length;
-    
-    // Find all text nodes that overlap with this sentence
-    const overlappingNodes = textNodeMappings.filter(mapping => 
-        (mapping.start < sentenceEnd && mapping.end > sentenceStart)
-    );
-    
-    // If more than one text node overlaps with the sentence, it spans multiple nodes
-    return overlappingNodes.length > 1;
-}
+
 function applyRewritesToElement(
     element: HTMLElement,
     rewrites: Array<{
@@ -210,4 +199,4 @@ function updateDarkModeStyling() {
 }
 
 
-export {isElementVisible, isElementInViewport, getTextNodesWithOffsets, sentenceSpansMultipleNodes, applyRewritesToElement, restoreOriginalText, updateDarkModeStyling};
+export {isElementVisible, isElementInViewport, getTextNodesWithOffsets, applyRewritesToElement, restoreOriginalText, updateDarkModeStyling};
