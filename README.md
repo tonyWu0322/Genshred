@@ -1,23 +1,23 @@
-## Todo List
+## 项目进度追踪
 
 ### 前端
-- 网页处理逻辑优化，适配更多场景
+- 网页处理逻辑优化，适配更多场景 (content.ts 已模块化)
     - DOM 优化（Immersive Translation deepwiki）
     - 更便捷的prompt优化
     - 针对长网页的懒加载
+#### To-do
 - 端口选择与切换
     - 目前是写死的 localhost
-- 本地缓存功能实装
-    - clear cache 按钮目前未实装 
-- AI 对话窗口
+- 更好的AI 对话窗口
     - 可加载的课程包或与课程网页互动的 AI
 - 用户系统
     - 注册页面等
 
 ### 后端
-- 数据库结构优化
+#### Todo
+- 数据库结构优化 (已支持 PostgreSQL)
     - 数据脱敏
-- 报错处理，rebouncing(?)
+- 数据库端的报错处理，rebouncing
 - 访问频次、次数上限
 - 更好的用户系统
 
@@ -41,6 +41,7 @@ npm run dev
 Open your browser and load the appropriate development build. For example, if you are developing for the chrome browser, using manifest v3, use: `build/chrome-mv3-dev`.
 
 You can start editing the popup by modifying `popup.tsx`. It should auto-update as you make changes. To add an options page, simply add a `options.tsx` file to the root of the project, with a react component default exported. Likewise to add a content page, add a `content.ts` file to the root of the project, importing some module and do some logic, then reload the extension on your browser.
+The `content.ts` file is now modularized. You can find its constituent modules in the `content_modules/` directory.
 
 For further guidance, [visit our Documentation](https://docs.plasmo.com/)
 
