@@ -108,26 +108,25 @@ function handleSettingsUpdate(newSettings: Settings) {
 
     // This is where you put all the action logic that used to be in loadSettings and onChanged
     if (newSettings[STORAGE_KEYS.IS_ON]) {
-        restoreOriginalText();
         processParagraphs();
         startObservingDOMChanges();
     } else {
-        restoreOriginalText();
+        // restoreOriginalText();
         stopObservingDOMChanges();
     }
 
-    if (newSettings[STORAGE_KEYS.DARK_MODE]) {
-        updateDarkModeStyling();
+
+    updateDarkModeStyling();
     }
     
     // You can also handle reading mode and other setting-specific actions here
-    if (newSettings[STORAGE_KEYS.READING_MODE]) {
-        restoreOriginalText();
-        if (newSettings[STORAGE_KEYS.IS_ON]) {
-            processParagraphs();
-        }
-    }
-}
+    // if (newSettings[STORAGE_KEYS.READING_MODE]) {
+    //     restoreOriginalText();
+    //     if (newSettings[STORAGE_KEYS.IS_ON]) {
+    //         processParagraphs();
+    //     }
+    // }
+
 
 // Call the function to load initial settings, then register the callback to listen for future changes
 loadSettings();
@@ -138,10 +137,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     
     // All state-related changes are dealt within the popup now
     // if (message.type === "SET_MANUAL_SELECT_MODE") {
-    //     manualSelectModeEnabled = message.enabled;
-    //     console.log(`Manual select mode changed to: ${manualSelectModeEnabled}`);
+    //     genShredManualSelect = message.enabled;
+    //     console.log(`Manual select mode changed to: ${genShredManualSelect}`);
     //     // Hide rewrite button if manual select mode is disabled
-    //     if (!manualSelectModeEnabled) {
+    //     if (!genShredManualSelect) {
     //         hideRewriteButton();
     //     }
     //     return false;
@@ -159,7 +158,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             if (keysToRemove.length > 0) {
                 chrome.storage.local.remove(keysToRemove, () => {
                     console.log(`Removed ${keysToRemove.length} items from cache.`);
-        restoreOriginalText(); // Revert any changes on the page
+        // restoreOriginalText(); // Revert any changes on the page
         if (currentSettings[STORAGE_KEYS.IS_ON]) {
             processParagraphs(); // Re-process the page with current settings
         }
@@ -346,16 +345,23 @@ async function handleRewriteSelectedText() {
 }
 
 function handleTextSelection(event: MouseEvent) {
-    console.log("handleTextSelection called, manualSelectModeEnabled:", currentSettings.manualSelectModeEnabled);
     
-    // Ensure that currentSelectionRange is always set to the actual selection if manualSelectModeEnabled
+    console.log("handleTextSelection called, genShredManualSelect:", currentSettings.genShredManualSelect);
+    
+    // Ensure that currentSelectionRange is always set to the actual selection if genShredManualSelect
     const selection = window.getSelection();
-    console.log("Selection:", selection, "rangeCount:", selection?.rangeCount, "isCollapsed:", selection?.isCollapsed, "manualSelectModeEnabled:", currentSettings.manualSelectModeEnabled);
+      // ✅ 忽略光标点击（未选中任何文本）
+      if (!selection || selection.isCollapsed) {
+        console.log("Selection is collapsed (caret move), ignoring...");
+        return;
+    }
+
+    console.log("Selection:", selection, "rangeCount:", selection?.rangeCount, "isCollapsed:", selection?.isCollapsed, "genShredManualSelect:", currentSettings.genShredManualSelect);
 
     // See constants.ts
     // const MAX_PARAGRAPH_LENGTH = 1000; // Define a reasonable max length for selected text
     
-    if (currentSettings.manualSelectModeEnabled && selection && selection.rangeCount > 0 && !selection.isCollapsed) {
+    if (currentSettings.genShredManualSelect && selection && selection.rangeCount > 0 && !selection.isCollapsed) {
         const range = selection.getRangeAt(0);
         const selectedText = range.toString().trim();
 

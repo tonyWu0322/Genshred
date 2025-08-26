@@ -1,9 +1,9 @@
 {
   "name": "genshred-impart",
   "displayName": "Genshred impart",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "AI paraphrasal tool",
-  "author": "yuanyou_test",
+  "author": "yuanyou, yanyuss",
   "scripts": {
     "dev": "plasmo dev",
     "build": "plasmo build",

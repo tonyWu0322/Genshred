@@ -26,6 +26,7 @@
     border: 1px solid #4a5568; /* Dark border */
 }
 
+
 /* Dark mode hover effect */
 .genshred-rewritten.genshred-dark-mode:hover {
     background-color: #4a5568;
@@ -131,8 +132,22 @@
     display: inline;
     position: relative;
 }
+/* === 显示控制：统一管理 visibility === */
 
-/* 确保原文本在隐藏状态下不占用空间 */
+/* 默认隐藏：所有带 genshred-visible 的才显示 */
+
 .genshred-original-hidden {
+    display: none !important;
+}
+
+/* 显示状态：只有加了 genshred-visible 的才显示 */
+.genshred-rewritten.genshred-visible,
+.genshred-original-hidden.genshred-visible {
+    display: inline !important;
+}
+
+/* 隐藏状态：明确隐藏（可选，用于 clarity） */
+.genshred-rewritten:not(.genshred-visible),
+.genshred-original-hidden:not(.genshred-visible) {
     display: none !important;
 }

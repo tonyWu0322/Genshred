@@ -187,16 +187,19 @@ function applyRewritesToElement(
 
 // NEW: Function to update dark mode styling for existing rewritten elements
 function updateDarkModeStyling() {
-    const rewrittenElements = document.querySelectorAll('.genshred-rewritten');
-    rewrittenElements.forEach((element) => {
-        if (currentSettings.darkModeEnabled) {
-            element.classList.add('genshred-dark-mode');
+    console.log("Updating dark mode styling...");
+    const rewrittenSpans = document.querySelectorAll('.genshred-processed .genshred-rewritten');
+    console.log("Found rewritten spans:", rewrittenSpans); // ← 检查数量
+    rewrittenSpans.forEach((span) => {
+        if (currentSettings.genShredDarkMode) {
+            span.classList.add('genshred-dark-mode');
         } else {
-            element.classList.remove('genshred-dark-mode');
+            span.classList.remove('genshred-dark-mode');
         }
     });
-    console.log(`Updated dark mode styling for ${rewrittenElements.length} elements`);
 }
+
+
 
 
 export {isElementVisible, isElementInViewport, getTextNodesWithOffsets, applyRewritesToElement, restoreOriginalText, updateDarkModeStyling};

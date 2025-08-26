@@ -80,71 +80,77 @@ function createLoadingSpan(sentence: string): HTMLElement {
 }
 
 
-/**
- * Helper function to create the rewrite container span with its children and event listeners.
- */
 function createRewriteSpan(originalText: string, rewrittenText: string): HTMLSpanElement {
     const containerSpan = document.createElement('span');
-    containerSpan.className = 'genshred-rewrite-container';
+    containerSpan.className = 'genshred-rewrite-container genshred-processed';
     containerSpan.setAttribute('data-original-text', escapeHTML(originalText));
 
+    // ✅ 改写文本：默认显示
     const rewrittenSpan = document.createElement('span');
     rewrittenSpan.className = 'genshred-rewritten';
-    // Apply dark mode styling if enabled
-    if (currentSettings.darkModeEnabled) {
+    // 创建后立即设置初始状态
+    rewrittenSpan.classList.add('genshred-visible');     // ✅ 初始显示改写文本
+    
+    if (currentSettings.genShredDarkMode) {
         rewrittenSpan.classList.add('genshred-dark-mode');
     }
     rewrittenSpan.textContent = rewrittenText;
 
+    // ✅ 原始文本：默认隐藏
     const originalHiddenSpan = document.createElement('span');
     originalHiddenSpan.className = 'genshred-original-hidden';
     originalHiddenSpan.textContent = originalText;
+    originalHiddenSpan.classList.remove('genshred-visible'); // ✅ 确保原文隐藏
 
     containerSpan.appendChild(rewrittenSpan);
     containerSpan.appendChild(originalHiddenSpan);
-    
-    // Add event listeners
-    containerSpan.addEventListener('mouseover', (e) => {
-        showTooltip(originalText, e as MouseEvent, containerSpan);
-    });
-    containerSpan.addEventListener('mouseout', () => {
-                hideTooltip();
-            });
+
     containerSpan.addEventListener('click', (e) => {
         e.stopPropagation();
-        if (rewrittenSpan.style.display !== 'none') {
-            rewrittenSpan.style.display = 'none';
-            originalHiddenSpan.style.display = 'inline';
+        console.log("clicked! Toggling visibility via class...");
+    
+        // 检查当前是否显示改写文本
+        const isShowingRewritten = !originalHiddenSpan.classList.contains('genshred-visible');
+    
+        if (isShowingRewritten) {
+            // 当前显示改写 → 切换为显示原文
+            rewrittenSpan.classList.remove('genshred-visible'); // 可选：如果它也有这个类
+            originalHiddenSpan.classList.add('genshred-visible');
         } else {
-            rewrittenSpan.style.display = 'inline';
-            originalHiddenSpan.style.display = 'none';
+            // 当前显示原文 → 切换为显示改写
+            rewrittenSpan.classList.add('genshred-visible');
+            originalHiddenSpan.classList.remove('genshred-visible');
         }
+    
+        console.log("After toggle:", {
+            rewrittenHasVisible: rewrittenSpan.classList.contains('genshred-visible'),
+            originalHasVisible: originalHiddenSpan.classList.contains('genshred-visible')
+        });
     });
 
     return containerSpan;
 }
 
 function restoreOriginalText() {
-    // 隐藏提示框
-    hideTooltip();
-    
-    // 查找所有已改写的元素
-    const modifiedSpans = document.querySelectorAll("span.genshred-rewritten[data-original-text], span[data-original]");
-    modifiedSpans.forEach((span) => {
-      // 尝试获取原始文本
-      const original = span.getAttribute("data-original-text") || span.getAttribute("data-original");
-      if (original) {
-        const textNode = document.createTextNode(original);
-        // 替换span为文本节点
-        span.parentNode?.replaceChild(textNode, span);
-      }
+    console.trace("🚨 restoreOriginalText was called!"); // ← 会打印调用栈
+    console.log("Restoring original text...");
+    const containers = document.querySelectorAll("span.genshred-rewrite-container[data-original-text]");
+    console.log("Found containers:", containers);
+
+    containers.forEach((container) => {
+        const originalText = container.getAttribute("data-original-text") || "";
+        console.log("Original text:", originalText);
+        const textNode = document.createTextNode(originalText);
+        container.parentNode?.replaceChild(textNode, container);
     });
-    
-    // 移除所有已处理标记
+
     document.querySelectorAll('.genshred-processed').forEach(el => {
-      el.classList.remove('genshred-processed');
+        el.classList.remove('genshred-processed');
     });
-  }
+
+    console.log("Original text restored");
+}
+
 // New function: applySingleRewriteToElement
 function applySingleRewriteToElement(
     element: HTMLElement,
