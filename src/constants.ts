@@ -26,6 +26,7 @@ const DEFAULT_SETTINGS = {
   
 const PROCESSING_DELAY = 1000; // 1 second delay between processing requests
 // const PARAGRAPH_CACHE = new Map<string, any>(); // Cache for processed paragraphs not yet effective 未实装
-const MIN_PARAGRAPH_LENGTH = 100; // Minimum characters to process
+const MIN_PARAGRAPH_LENGTH = 20; // Reduced from 100 to 20 for better Chinese support
+const MIN_CHINESE_PARAGRAPH_LENGTH = 10; // Special minimum for Chinese text (more concise)
 const MAX_PARAGRAPH_LENGTH = 11451419; // Maximum characters to process
-export {STORAGE_KEYS, DEFAULT_SETTINGS, MIN_PARAGRAPH_LENGTH, MAX_PARAGRAPH_LENGTH, PROCESSING_DELAY };
+export {STORAGE_KEYS, DEFAULT_SETTINGS, MIN_PARAGRAPH_LENGTH, MIN_CHINESE_PARAGRAPH_LENGTH, MAX_PARAGRAPH_LENGTH, PROCESSING_DELAY };

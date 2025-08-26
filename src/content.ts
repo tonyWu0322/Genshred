@@ -17,7 +17,7 @@ import { startObservingDOMChanges, stopObservingDOMChanges, setupIntersectionObs
 // All from `api-helpers.ts`
 import { processElement, getPromptForDifficultyAndLanguage, detectLanguage} from './lib/api-helpers';
 // All from `utilities.ts`
-import { debounce, escapeRegExp, escapeHTML, calculateComplexityScore, selectSentences, sha256, handleIframes} from './lib/utilities';
+import { debounce, escapeRegExp, escapeHTML, calculateComplexityScore, selectSentences, sha256, handleIframes, clearPageLanguageCache, testLanguageDetection, testLanguageModelSelection } from './lib/utilities';
 // All from `constants.ts`
 import { STORAGE_KEYS, DEFAULT_SETTINGS, MIN_PARAGRAPH_LENGTH, MAX_PARAGRAPH_LENGTH, PROCESSING_DELAY } from './constants';
 // All from `types.ts`
@@ -56,6 +56,14 @@ let mutationObserver: MutationObserver | null = null;
 function initialize() {
     loadSettings();
     createTooltip(); // 创建全局提示框
+    
+    // Clear page language cache on initialization
+    clearPageLanguageCache();
+    
+    // Expose test functions to global scope for debugging
+    (window as any).testLanguageDetection = testLanguageDetection;
+    (window as any).clearPageLanguageCache = clearPageLanguageCache;
+    (window as any).testLanguageModelSelection = testLanguageModelSelection;
     
     // Add event listeners for manual selection
     document.addEventListener('mouseup', handleTextSelection);

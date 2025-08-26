@@ -16,7 +16,7 @@ interface ProcessResponse {
 }
 const PROCESSING_DELAY = 1000; // 1 second delay between processing requests
 // const PARAGRAPH_CACHE = new Map<string, any>(); // Cache for processed paragraphs not yet effective 未实装
-const MIN_PARAGRAPH_LENGTH = 100; // Minimum characters to process
+const MIN_PARAGRAPH_LENGTH = 20; // Reduced from 100 to 20 for better Chinese support
 const MAX_PARAGRAPH_LENGTH = 11451419; // Maximum characters to process
 // lazyloading
 let intersectionObserver: IntersectionObserver | null = null;
@@ -69,7 +69,7 @@ async function processElement(element: HTMLElement) {
 
         // Skip elements with too many child nodes (likely complex formatting)
         const childNodes = element.querySelectorAll('*');
-        const maxChildNodes = readingModeEnabled ? 10 : 20; // More conservative in reading mode
+        const maxChildNodes = readingModeEnabled ? 50 : 100; // Increased for better Chinese support
         if (childNodes.length > maxChildNodes) {
             console.log(`Skipping element with too many child nodes: ${childNodes.length} (max: ${maxChildNodes})`);
             return;

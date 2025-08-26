@@ -1,9 +1,8 @@
 import { processElement } from './api-helpers';
-import { applyRewritesToElement } from './dom-utilities';
-import { STORAGE_KEYS, MAX_PARAGRAPH_LENGTH,MIN_PARAGRAPH_LENGTH } from '~src/constants';
+import { STORAGE_KEYS, MAX_PARAGRAPH_LENGTH,MIN_PARAGRAPH_LENGTH, MIN_CHINESE_PARAGRAPH_LENGTH } from '~src/constants';
 import { currentSettings } from './state-management';
-import { debounce } from './utilities';
-import { isElementVisible,isElementInViewport } from './dom-utilities';
+import { debounce, isChineseText, isMeaningfulChineseText, shouldSkipChineseElement, getChineseTextRatio } from './utilities';
+import { isElementVisible, isElementInViewport } from './dom-utilities';
 // 添加MutationObserver来监听DOM变化 **注意添加动画后亦会触发**
 let mutationObserver: MutationObserver | null = null;
 // Define the variables here, scoped to this module
@@ -215,11 +214,20 @@ async function processParagraphs() {
                 return false;
             }
             if (trimmedTextLength < MIN_PARAGRAPH_LENGTH) {
-                console.log(`Filtering out element due to short text length (${trimmedTextLength} chars):`, element.nodeName);
-                if (element instanceof HTMLElement) {
-                    element.classList.add('genshred-processed');
+                // Check if it's Chinese text and use Chinese-specific minimum
+                const chineseText = element.textContent || '';
+                
+                if (isChineseText(chineseText) && trimmedTextLength >= MIN_CHINESE_PARAGRAPH_LENGTH) {
+                    // Chinese text with sufficient length, allow it
+                    const chineseRatio = getChineseTextRatio(chineseText);
+                    console.log(`Allowing Chinese element with ${trimmedTextLength} chars (Chinese ratio: ${chineseRatio.toFixed(2)})`);
+                } else {
+                    console.log(`Filtering out element due to short text length (${trimmedTextLength} chars):`, element.nodeName);
+                    if (element instanceof HTMLElement) {
+                        element.classList.add('genshred-processed');
+                    }
+                    return false;
                 }
-                return false;
             }
             if (trimmedTextLength > MAX_PARAGRAPH_LENGTH) {
                 console.log(`Filtering out element due to long text length (${trimmedTextLength} chars):`, element.nodeName);
@@ -240,9 +248,49 @@ async function processParagraphs() {
             }
             // Heuristic: check if the text contains very few alphabetic characters, indicating it might be code or symbols
             const alphabeticCharCount = (element.textContent?.match(/[a-zA-Z]/g) || []).length;
+            const chineseCharCount = (element.textContent?.match(/[\u4e00-\u9fff]/g) || []).length;
             const totalCharCount = element.textContent?.length || 0;
-            // If it's a short string (e.g., < 20 chars) and less than 30% alphabetic, likely not natural language
-            if (totalCharCount > 0 && totalCharCount < 50 && (alphabeticCharCount / totalCharCount < 0.3)) {
+            
+            // Improved language detection for Chinese and other non-Latin scripts
+            const hasChineseChars = chineseCharCount > 0;
+            const hasLatinChars = alphabeticCharCount > 0;
+            
+            // Chinese-specific filtering logic
+            if (hasChineseChars) {
+                // Use Chinese text processing utilities
+                const chineseText = element.textContent || '';
+                const chineseRatio = getChineseTextRatio(chineseText);
+                
+                // Rule 1: Must be meaningful Chinese text
+                if (!isMeaningfulChineseText(chineseText)) {
+                    console.log(`Filtering out Chinese element: not meaningful Chinese text`);
+                    return false;
+                }
+                
+                // Rule 2: Check for skip patterns
+                if (shouldSkipChineseElement(chineseText)) {
+                    console.log(`Filtering out Chinese element: matches skip pattern`);
+                    return false;
+                }
+                
+                // Rule 3: Minimum Chinese characters
+                if (chineseCharCount < 5) {
+                    console.log(`Filtering out Chinese element: too few Chinese characters (${chineseCharCount})`);
+                    return false;
+                }
+                
+                console.log(`Chinese element passed all filters: ${chineseCharCount} chars, ratio: ${chineseRatio.toFixed(2)}`);
+            } else if (hasLatinChars) {
+                // Original English logic for Latin text
+                if (totalCharCount > 0 && totalCharCount < 50) {
+                    if (alphabeticCharCount / totalCharCount < 0.3) {
+                        console.log(`Filtering out Latin element: insufficient alphabetic characters`);
+                        return false;
+                    }
+                }
+            } else {
+                // No recognizable characters, likely code or symbols
+                console.log(`Filtering out element: no recognizable characters`);
                 return false;
             }
             // In observers.ts, inside your element discovery loop:

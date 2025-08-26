@@ -3,15 +3,29 @@ import { convert3To2 } from '~scripts/language_code_converter';
 import { STORAGE_KEYS } from '../constants';
 import type { ProcessResponse } from '../types';
 import { currentSettings } from './state-management';
-import { MIN_PARAGRAPH_LENGTH,MAX_PARAGRAPH_LENGTH } from '../constants';
-import { sha256,calculateComplexityScore, selectSentences, withTimeout } from './utilities';
+import { MIN_PARAGRAPH_LENGTH,MAX_PARAGRAPH_LENGTH, MIN_CHINESE_PARAGRAPH_LENGTH } from '../constants';
+import { sha256,calculateComplexityScore, selectSentences, withTimeout, isChineseText, getChineseTextRatio, detectPageLanguage, getLanguageSpecificModel } from './utilities';
 import { createLoadingSpan,createRewriteSpan,applySingleRewriteToElement } from './ui-components';
 import { isElementVisible, getTextNodesWithOffsets,applyRewritesToElement } from './dom-utilities';
 import {franc} from "franc-min";
 
 export function detectLanguage(text){
     var detectedLanguage=franc(text);
-    return convert3To2(detectedLanguage);
+    var convertedLanguage = convert3To2(detectedLanguage);
+    
+    // If franc couldn't detect the language, try to detect Chinese manually
+    if (convertedLanguage === null || convertedLanguage === 'und') {
+        const chineseCharCount = (text.match(/[\u4e00-\u9fff]/g) || []).length;
+        const totalCharCount = text.length;
+        
+        // If more than 30% of characters are Chinese, assume it's Chinese
+        if (chineseCharCount > 0 && (chineseCharCount / totalCharCount) > 0.3) {
+            console.log("Manual Chinese detection: detected Chinese text");
+            return 'zh';
+        }
+    }
+    
+    return convertedLanguage;
 };
 
 async function processElement(element: HTMLElement) {
@@ -70,7 +84,7 @@ async function processElement(element: HTMLElement) {
 
         // Skip elements with too many child nodes (likely complex formatting)
         const childNodes = element.querySelectorAll('*');
-        const maxChildNodes = 20; // read mode deprecated
+        const maxChildNodes = 100; // Increased from 20 to 100 for better Chinese support
         if (childNodes.length > maxChildNodes) {
             console.log(`Skipping element with too many child nodes: ${childNodes.length} (max: ${maxChildNodes})`);
             return;
@@ -94,8 +108,15 @@ async function processElement(element: HTMLElement) {
 
         // Check for minimum and maximum paragraph length early
         if (textBlock.length < MIN_PARAGRAPH_LENGTH) {
-            console.log(`Text block too short (${textBlock.length} chars), skipping. Min: ${MIN_PARAGRAPH_LENGTH}`);
-            return;
+            // Check if it's Chinese text and use Chinese-specific minimum
+            if (isChineseText(textBlock) && textBlock.length >= MIN_CHINESE_PARAGRAPH_LENGTH) {
+                // Chinese text with sufficient length, allow it
+                const chineseRatio = getChineseTextRatio(textBlock);
+                console.log(`Allowing Chinese text block with ${textBlock.length} chars (Chinese ratio: ${chineseRatio.toFixed(2)})`);
+            } else {
+                console.log(`Text block too short (${textBlock.length} chars), skipping. Min: ${MIN_PARAGRAPH_LENGTH}`);
+                return;
+            }
         }
         if (textBlock.length > MAX_PARAGRAPH_LENGTH) {
             console.log(`Text block too long (${textBlock.length} chars), skipping. Max: ${MAX_PARAGRAPH_LENGTH}`);
@@ -106,11 +127,21 @@ async function processElement(element: HTMLElement) {
 
         // Mark as processing to prevent duplicate processing
         // element.classList.add('genshred-processing');
-        const detectedlanguage = detectLanguage(textBlock)
+        let detectedlanguage = detectLanguage(textBlock)
         console.log("Detected language:", detectedlanguage);
-        if (detectedlanguage === 'und') {
-            console.log("Undetected language, skipping.");
-            return;
+        if (detectedlanguage === 'und' || detectedlanguage === null) {
+            // Check if it's Chinese text manually
+            const chineseCharCount = (textBlock.match(/[\u4e00-\u9fff]/g) || []).length;
+            const totalCharCount = textBlock.length;
+            const chineseRatio = chineseCharCount / totalCharCount;
+            
+            if (chineseRatio > 0.3) {
+                console.log("Manual Chinese detection: detected Chinese text, using 'zh'");
+                detectedlanguage = 'zh';
+            } else {
+                console.log("Undetected language, but continuing with default language (en)");
+                detectedlanguage = 'en';
+            }
         }
         const userLangPrefs = await chrome.storage.local.get('genshred_ignore_languages');
         const ignoreLangs: string[] = userLangPrefs['genshred_ignore_languages'] || [];
@@ -145,11 +176,17 @@ async function processElement(element: HTMLElement) {
             return;
         }
 
-        // Request sentence splitting from background script
+        // Detect page language and get appropriate sentence splitting model
+        const pageLanguage = detectPageLanguage();
+        const sentenceModel = getLanguageSpecificModel(pageLanguage);
+        console.log(`Page language detected: ${pageLanguage}, using model: ${sentenceModel}`);
+
+        // Request sentence splitting from background script with language-specific model
         const splitResponse = await chrome.runtime.sendMessage({
             type: "SPLIT_SENTENCES",
             text: textBlock,
-            language: detectedlanguage
+            language: pageLanguage,
+            model: sentenceModel
         });
 
         if (splitResponse === undefined || splitResponse === null || splitResponse.error) {
@@ -184,16 +221,59 @@ async function processElement(element: HTMLElement) {
         console.log(`Filtered ${sentencesWithOriginalData.length - sentencesWithOriginalDataFiltered.length} sentences that span multiple text nodes`);
         console.log("Remaining sentences with calculated complexity scores:", sentencesWithOriginalDataFiltered);
 
-        // Calculate number of sentences to rewrite based on percentage
-        const percentageToRewrite = Number(currentSettings[STORAGE_KEYS.SENTENCE_COUNT]); // This is now a percentage (0-100)
-        const numSentencesToRewrite = Math.round(sentencesWithOriginalDataFiltered.length * (percentageToRewrite / 100));
+        // For Chinese text, process a reduced subset with extra filters and avoid long consecutive runs
+        let sentencesToProcess;
+        if (detectedlanguage === 'zh') {
+            // 进一步过滤中文：去掉过短/无中文/全标点的句子
+            const chineseCharRegex = /[\u4e00-\u9fff]/;
+            const onlyPunctRegex = /^[\p{P}\p{Z}\p{S}]+$/u; // 仅标点/空白/符号
+            const zhFiltered = sentencesWithOriginalDataFiltered.filter(({ sentence }) => {
+                const trimmed = sentence.trim();
+                if (trimmed.length < 6) return false; // 过短
+                if (!chineseCharRegex.test(trimmed)) return false; // 不含中文
+                if (onlyPunctRegex.test(trimmed)) return false; // 纯标点/空白
+                return true;
+            });
 
-        const selectedSentences = selectSentences(
-            sentencesWithOriginalDataFiltered,
-            numSentencesToRewrite
-        );
-        console.log(`Selected ${selectedSentences.length} sentences for rewriting:`, selectedSentences);
-        const rewritePromises = selectedSentences.map(async({sentence, index, startIndex})=>{
+            // 目标数量：约 30%（向上取整），至少 1 个
+            const targetCount = Math.max(1, Math.ceil(zhFiltered.length * 0.3));
+
+            // 避免连续选择超过 2 个句子：线性扫描选择
+            const selected: typeof zhFiltered = [];
+            let runLength = 0;
+            for (let i = 0; i < zhFiltered.length && selected.length < targetCount; i++) {
+                const current = zhFiltered[i];
+                // 如果上一条选择了，则 runLength+1，否则重置
+                const prevSelected = selected.length > 0 ? selected[selected.length - 1] : null;
+                const prevIndex = prevSelected ? prevSelected.index : -Infinity;
+                if (prevIndex + 1 === current.index) {
+                    // 与上一条相邻
+                    if (runLength >= 2) {
+                        // 已经连续两条，跳过本句，等待间隔
+                        continue;
+                    } else {
+                        runLength += 1;
+                        selected.push(current);
+                    }
+                } else {
+                    // 打断了连续段，重置计数并选中
+                    runLength = 1;
+                    selected.push(current);
+                }
+            }
+
+            sentencesToProcess = selected;
+            console.log(`Chinese text detected: selecting ${sentencesToProcess.length}/${zhFiltered.length} (target ~${targetCount}) with no >2 consecutive.`);
+        } else {
+            // Non-Chinese text: use percentage-based selection
+            const percentageToRewrite = Number(currentSettings[STORAGE_KEYS.SENTENCE_COUNT]); // This is now a percentage (0-100)
+            const numSentencesToRewrite = Math.round(sentencesWithOriginalDataFiltered.length * (percentageToRewrite / 100));
+            sentencesToProcess = selectSentences(sentencesWithOriginalDataFiltered, numSentencesToRewrite);
+            console.log(`Non-Chinese text: selected ${sentencesToProcess.length} sentences for rewriting (${percentageToRewrite}%)`);
+        }
+
+        console.log(`Processing ${sentencesToProcess.length} sentences:`, sentencesToProcess);
+        const rewritePromises = sentencesToProcess.map(async({sentence, index, startIndex})=>{
             const loadingSpan = createLoadingSpan(sentence);
             applySingleRewriteToElement(element, sentence, '', startIndex, textNodeMappings, loadingSpan);
 
@@ -208,7 +288,8 @@ async function processElement(element: HTMLElement) {
                             promptInstruction: promptToUse,
                             customPromptTemplate: effectiveCustomPromptTemplate,
                             userLevel: selectedDifficulty,
-                            originalIndex: index
+                            originalIndex: index,
+                            language: detectedlanguage // Add language information
                         },
                         (response) => resolve(response)
                         );
