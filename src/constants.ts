@@ -6,7 +6,8 @@ const STORAGE_KEYS = {
     CUSTOM_PROMPT: 'genShredCustomPromptTemplate', // Assuming you'll add this later
     DARK_MODE: 'genShredDarkMode', // Added for dark mode toggle
     READING_MODE: 'genShredReadingMode', // Added for reading mode
-    MANUAL_SELECT: 'genShredManualSelect' // Added for manual select mode
+    MANUAL_SELECT: 'genShredManualSelect', // Added for manual select mode
+    HIDE_AI_CHAT: 'genShredHideAIChat' // Added for hiding AI chat feature
 };
 
 const DEFAULT_SETTINGS = {
@@ -16,6 +17,7 @@ const DEFAULT_SETTINGS = {
     [STORAGE_KEYS.DARK_MODE]: false, // Default to light mode
     [STORAGE_KEYS.READING_MODE]: false, // Default to normal mode
     [STORAGE_KEYS.MANUAL_SELECT]: true, // Default to enabled manual select mode
+    [STORAGE_KEYS.HIDE_AI_CHAT]: false, // Default to show AI chat feature
     [STORAGE_KEYS.DIFFICULTY_MAPPING]:  {
       "Easy": "Simplify vocabulary and sentence structure for a beginner (A2 CEFR level).",
       "Normal": "Rewrite for an intermediate English speaker (B2 CEFR level). Use clear and concise language.",

@@ -16,6 +16,7 @@ function Popup() {
   const [manualSelect, setManualSelect] = useState<boolean>(DEFAULT_SETTINGS[STORAGE_KEYS.MANUAL_SELECT] as boolean);
   const [darkMode, setDarkMode] = useState<boolean>(DEFAULT_SETTINGS[STORAGE_KEYS.DARK_MODE] as boolean);
   const [readingMode, setReadingMode] = useState<boolean>(DEFAULT_SETTINGS[STORAGE_KEYS.READING_MODE] as boolean);
+  const [hideAIChat, setHideAIChat] = useState<boolean>(DEFAULT_SETTINGS[STORAGE_KEYS.HIDE_AI_CHAT] as boolean);
   
   // Modal states
   const [isPromptModalOpen, setIsPromptModalOpen] = useState(false);
@@ -44,6 +45,7 @@ function Popup() {
       setManualSelect(storedSettings[STORAGE_KEYS.MANUAL_SELECT] ?? DEFAULT_SETTINGS[STORAGE_KEYS.MANUAL_SELECT]);
       setDarkMode(storedSettings[STORAGE_KEYS.DARK_MODE] ?? DEFAULT_SETTINGS[STORAGE_KEYS.DARK_MODE]);
       setReadingMode(storedSettings[STORAGE_KEYS.READING_MODE] ?? DEFAULT_SETTINGS[STORAGE_KEYS.READING_MODE]);
+      setHideAIChat(storedSettings[STORAGE_KEYS.HIDE_AI_CHAT] ?? DEFAULT_SETTINGS[STORAGE_KEYS.HIDE_AI_CHAT]);
       setDifficultyMappings(storedSettings[STORAGE_KEYS.DIFFICULTY_MAPPING] ?? DEFAULT_SETTINGS[STORAGE_KEYS.DIFFICULTY_MAPPING]);
       setCustomPrompts(storedSettings['genShredCustomPrompts'] ?? []);
     };
@@ -59,6 +61,7 @@ function Popup() {
         if (changes[STORAGE_KEYS.MANUAL_SELECT]) setManualSelect(changes[STORAGE_KEYS.MANUAL_SELECT].newValue);
         if (changes[STORAGE_KEYS.DARK_MODE]) setDarkMode(changes[STORAGE_KEYS.DARK_MODE].newValue);
         if (changes[STORAGE_KEYS.READING_MODE]) setReadingMode(changes[STORAGE_KEYS.READING_MODE].newValue);
+        if (changes[STORAGE_KEYS.HIDE_AI_CHAT]) setHideAIChat(changes[STORAGE_KEYS.HIDE_AI_CHAT].newValue);
         if (changes['genShredDifficultyMapping']) setDifficultyMappings(changes['genShredDifficultyMapping'].newValue);
         if (changes['genShredCustomPrompts']) setCustomPrompts(changes['genShredCustomPrompts'].newValue);
       }
@@ -137,6 +140,13 @@ function Popup() {
     const newState = !readingMode;
     // setReadingMode(newState); // State will be updated by the listener
     await chrome.storage.local.set({ [STORAGE_KEYS.READING_MODE]: newState });
+  };
+
+  // Hide AI chat toggle, now only sets storage
+  const handleHideAIChatToggle = async () => {
+    const newState = !hideAIChat;
+    // setHideAIChat(newState); // State will be updated by the listener
+    await chrome.storage.local.set({ [STORAGE_KEYS.HIDE_AI_CHAT]: newState });
   };
 
   // Add this handler after your other handler functions
@@ -252,6 +262,19 @@ function Popup() {
               id="dark-mode-toggle"
               checked={!!darkMode}
               onChange={handleDarkModeToggle}
+            />
+            <span className="slider round"></span>
+          </label>
+        </div>
+
+        <div className="control-group">
+          <label htmlFor="hide-ai-chat-toggle">AI Chat</label>
+          <label className="switch">
+            <input
+              type="checkbox"
+              id="hide-ai-chat-toggle"
+              checked={!hideAIChat}
+              onChange={handleHideAIChatToggle}
             />
             <span className="slider round"></span>
           </label>

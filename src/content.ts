@@ -82,6 +82,14 @@ function initialize() {
     // 处理iframe内容
     handleIframes();
 
+    // Listen for storage changes to handle AI chat visibility
+    chrome.storage.onChanged.addListener((changes, namespace) => {
+        if (namespace === 'local' && changes[STORAGE_KEYS.HIDE_AI_CHAT]) {
+            // Re-inject or remove AI chat window based on new setting
+            injectAIChatWindow();
+        }
+    });
+
     // Clean up observers when page is unloaded
     window.addEventListener('unload', () => {
         if (intersectionObserver) {
@@ -401,7 +409,20 @@ function replaceSelectionWithRewrittenText(range: Range, rewrittenText: string, 
 
 
 // Inject AIChatWindow into the page using a shadow DOM
-function injectAIChatWindow() {
+async function injectAIChatWindow() {
+    // Check if AI chat should be hidden
+    const settings = await chrome.storage.local.get([STORAGE_KEYS.HIDE_AI_CHAT]);
+    const hideAIChat = settings[STORAGE_KEYS.HIDE_AI_CHAT] ?? DEFAULT_SETTINGS[STORAGE_KEYS.HIDE_AI_CHAT];
+    
+    if (hideAIChat) {
+        // Remove existing chat window if it exists
+        const existingContainer = document.getElementById('genshred-ai-chat-root');
+        if (existingContainer) {
+            existingContainer.remove();
+        }
+        return;
+    }
+
     if (document.getElementById('genshred-ai-chat-root')) return; // Prevent double-injection
     const container = document.createElement('div');
     container.id = 'genshred-ai-chat-root';
