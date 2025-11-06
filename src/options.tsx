@@ -39,18 +39,21 @@ function Options() {
     const [ignoreLangs, setIgnoreLangs] = useState<string[]>([]);
     const [promptMatrix, setPromptMatrix] = useState<any>(DEFAULT_PROMPT_MATRIX);
     const [cellActive, setCellActive] = useState(false);
+    const [minParagraphLength, setMinParagraphLength] = useState<number>(20);
     useEffect(() => {
         const loadSettings = async () => {
             const storedSettings = await chrome.storage.local.get([
                 STORAGE_KEYS.CUSTOM_PROMPT,
                 'genShredDifficultyMapping',
                 'genshred_ignore_languages',
-                'genshred_prompt_matrix'
+                'genshred_prompt_matrix',
+                STORAGE_KEYS.MIN_PARAGRAPH_LENGTH
             ]);
             setCustomPrompt(storedSettings[STORAGE_KEYS.CUSTOM_PROMPT] ?? CUSTOM_PROMPT_DEFAULT);
             setDifficultyMapping(storedSettings['genShredDifficultyMapping'] ?? difficultyMapping);
             setIgnoreLangs(storedSettings['genshred_ignore_languages'] ?? []);
             setPromptMatrix(storedSettings['genshred_prompt_matrix'] ?? DEFAULT_PROMPT_MATRIX);
+            setMinParagraphLength(storedSettings[STORAGE_KEYS.MIN_PARAGRAPH_LENGTH] ?? 20);
         };
         loadSettings();
     }, []);
@@ -60,7 +63,8 @@ function Options() {
             [STORAGE_KEYS.CUSTOM_PROMPT]: customPrompt,
             'genShredDifficultyMapping': difficultyMapping,
             'genshred_ignore_languages': ignoreLangs,
-            'genshred_prompt_matrix': promptMatrix
+            'genshred_prompt_matrix': promptMatrix,
+            [STORAGE_KEYS.MIN_PARAGRAPH_LENGTH]: minParagraphLength
         });
         setStatusMessage('Settings saved!');
         setTimeout(() => setStatusMessage(''), 3000);
@@ -82,6 +86,7 @@ function Options() {
             "Hard": "Rewrite for an advanced English speaker (C1 CEFR level). Use sophisticated vocabulary while maintaining clarity.",
             "Custom_1": "Rewrite for a user with specific needs, as defined by the custom prompt below."
         });
+        setMinParagraphLength(20);
         await chrome.storage.local.set({
             [STORAGE_KEYS.CUSTOM_PROMPT]: CUSTOM_PROMPT_DEFAULT,
             'genShredDifficultyMapping': { // Ensure full reset in storage
@@ -89,7 +94,8 @@ function Options() {
                 "Normal": "Rewrite for an intermediate English speaker (B2 CEFR level). Use clear and concise language.",
                 "Hard": "Rewrite for an advanced English speaker (C1 CEFR level). Use sophisticated vocabulary while maintaining clarity.",
                 "Custom_1": "Rewrite for a user with specific needs, as defined by the custom prompt below."
-            }
+            },
+            [STORAGE_KEYS.MIN_PARAGRAPH_LENGTH]: 20
         });
         setStatusMessage('Settings reset to defaults!');
         setTimeout(() => setStatusMessage(''), 3000);
@@ -111,6 +117,13 @@ function Options() {
                 [lang]: value
             }
         }));
+    };
+
+    const handleMinParagraphLengthChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const value = parseInt(event.target.value, 10);
+        if (!isNaN(value) && value >= 1 && value <= 1000) {
+            setMinParagraphLength(value);
+        }
     };
     return (
         <div className="options-container">
@@ -249,6 +262,44 @@ function Options() {
                     </label>
                 ))}
                 </section>
+
+            <section>
+                <h2>3. Minimum Paragraph Length</h2>
+                <p>Set the minimum character count for paragraphs to be processed. Smaller values will process more short paragraphs, larger values will only process longer paragraphs.</p>
+                <div style={{ marginBottom: '16px' }}>
+                    <label htmlFor="min-paragraph-length" style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>
+                        Minimum Paragraph Length (characters):
+                    </label>
+                    <input
+                        type="number"
+                        id="min-paragraph-length"
+                        min="1"
+                        max="1000"
+                        value={minParagraphLength}
+                        onChange={handleMinParagraphLengthChange}
+                        style={{
+                            padding: '8px 12px',
+                            border: '1px solid #ccc',
+                            borderRadius: '4px',
+                            fontSize: '14px',
+                            width: '120px',
+                            marginRight: '12px'
+                        }}
+                    />
+                    <span style={{ fontSize: '14px', color: '#666' }}>
+                        Current setting: {minParagraphLength} characters
+                    </span>
+                </div>
+                <div style={{ fontSize: '12px', color: '#888', lineHeight: '1.4' }}>
+                    <p><strong>Recommended values:</strong></p>
+                    <ul style={{ margin: '4px 0', paddingLeft: '20px' }}>
+                        <li>Chinese content: 10-20 characters</li>
+                        <li>English content: 20-50 characters</li>
+                        <li>Mixed content: 20-30 characters</li>
+                    </ul>
+                </div>
+            </section>
+
             <div className="button-group">
                 <button onClick={handleSave}>Save Settings</button>
                 <button onClick={handleResetToDefaults}>Reset to Defaults</button>

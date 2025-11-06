@@ -213,7 +213,10 @@ async function processParagraphs() {
             if (observedElements.has(element)) {
                 return false;
             }
-            if (trimmedTextLength < MIN_PARAGRAPH_LENGTH) {
+            // Get minimum paragraph length from settings
+            const minParagraphLength = currentSettings.genShredMinParagraphLength ?? MIN_PARAGRAPH_LENGTH;
+            
+            if (trimmedTextLength < minParagraphLength) {
                 // Check if it's Chinese text and use Chinese-specific minimum
                 const chineseText = element.textContent || '';
                 
@@ -222,7 +225,7 @@ async function processParagraphs() {
                     const chineseRatio = getChineseTextRatio(chineseText);
                     console.log(`Allowing Chinese element with ${trimmedTextLength} chars (Chinese ratio: ${chineseRatio.toFixed(2)})`);
                 } else {
-                    console.log(`Filtering out element due to short text length (${trimmedTextLength} chars):`, element.nodeName);
+                    console.log(`Filtering out element due to short text length (${trimmedTextLength} chars, min: ${minParagraphLength}):`, element.nodeName);
                     if (element instanceof HTMLElement) {
                         element.classList.add('genshred-processed');
                     }

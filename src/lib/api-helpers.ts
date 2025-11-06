@@ -107,14 +107,17 @@ async function processElement(element: HTMLElement) {
         console.log("Text block length:", textBlock.length);
 
         // Check for minimum and maximum paragraph length early
-        if (textBlock.length < MIN_PARAGRAPH_LENGTH) {
+        // Get minimum paragraph length from settings
+        const minParagraphLength = currentSettings.genShredMinParagraphLength ?? MIN_PARAGRAPH_LENGTH;
+        
+        if (textBlock.length < minParagraphLength) {
             // Check if it's Chinese text and use Chinese-specific minimum
             if (isChineseText(textBlock) && textBlock.length >= MIN_CHINESE_PARAGRAPH_LENGTH) {
                 // Chinese text with sufficient length, allow it
                 const chineseRatio = getChineseTextRatio(textBlock);
                 console.log(`Allowing Chinese text block with ${textBlock.length} chars (Chinese ratio: ${chineseRatio.toFixed(2)})`);
             } else {
-                console.log(`Text block too short (${textBlock.length} chars), skipping. Min: ${MIN_PARAGRAPH_LENGTH}`);
+                console.log(`Text block too short (${textBlock.length} chars), skipping. Min: ${minParagraphLength}`);
                 return;
             }
         }
