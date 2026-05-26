@@ -2,6 +2,7 @@
 
 import { DEFAULT_SETTINGS, STORAGE_KEYS } from "../constants";
 import type { Settings } from '../types';
+import * as log from "./logger";
 
 // The core state variables
 export let currentSettings: Settings = { ...DEFAULT_SETTINGS };
@@ -22,7 +23,7 @@ export function registerSettingsUpdateCallback(callback: (newSettings: Settings)
 
 // Function to load settings from storage
 export async function loadSettings() {
-    console.log("Content script loading settings...");
+    log.debug("Content script loading settings...");
     const storedSettings = await chrome.storage.local.get([
         ...Object.values(STORAGE_KEYS),
         'genShredDifficultyMapping',
@@ -46,7 +47,7 @@ export async function loadSettings() {
     currentDifficultyMappings = storedSettings['genShredDifficultyMapping'] ?? currentDifficultyMappings;
     currentCustomPrompts = storedSettings['genShredCustomPrompts'] ?? [];
 
-    console.log("Settings loaded:", currentSettings);
+    log.debug("Settings loaded:", currentSettings);
     // Call the callback to notify the main script
     if (onSettingsUpdatedCallback) {
         onSettingsUpdatedCallback(currentSettings);

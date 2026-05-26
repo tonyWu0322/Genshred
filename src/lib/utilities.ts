@@ -1,6 +1,7 @@
 import { rejects } from "assert";
 import { currentSettings } from "./state-management";
 import { STORAGE_KEYS } from "~src/constants";
+import * as log from "./logger";
 
 function debounce<F extends (...args: any[]) => any>(func: F, wait: number): (...args: Parameters<F>) => void {
     let timeout: number | undefined;
@@ -61,7 +62,7 @@ async function sha256(message: string): Promise<string> {
 function handleIframes() {
     // 如果当前页面是iframe，则不需要处理其他iframe
     if (window.self !== window.top) {
-        console.log("Running in iframe, skipping iframe handling");
+        log.debug("Running in iframe, skipping iframe handling");
         return;
     }
     
@@ -76,18 +77,18 @@ function handleIframes() {
                     
                     if (iframeDoc && currentSettings[STORAGE_KEYS.IS_ON]) {
                         // 在iframe内应用相同的处理逻辑
-                        console.log("Processing iframe content");
+                        log.debug("Processing iframe content");
                         
                         // 这里可以添加iframe内容处理逻辑
                         // 注意：由于同源策略限制，这只对同源iframe有效
                     }
                 } catch (e) {
                     // 跨域iframe会抛出错误，这是正常的
-                    console.log("Cannot access iframe content (likely cross-origin)");
+                    log.debug("Cannot access iframe content (likely cross-origin)");
                 }
             });
         } catch (e) {
-            console.error("Error processing iframes:", e);
+            log.error("Error processing iframes:", e);
         }
     };
     
@@ -149,11 +150,11 @@ let cachedPageLanguage: string | null = null;
 export function detectPageLanguage(): string {
     // Return cached result if available
     if (cachedPageLanguage) {
-        console.log(`Using cached page language: ${cachedPageLanguage}`);
+        log.debug(`Using cached page language: ${cachedPageLanguage}`);
         return cachedPageLanguage;
     }
     
-    console.log("=== Starting page language detection ===");
+    log.debug("=== Starting page language detection ===");
     
     // Method 1: Analyze page content (NOW HIGHEST PRIORITY)
     // Try to get content from main content areas first
@@ -195,8 +196,8 @@ export function detectPageLanguage(): string {
     const sampleSize = Math.min(contentText.length, 20000); // Increased sample size to 20k characters
     const sampleText = contentText.substring(0, sampleSize);
     
-    console.log(`Analyzing page content (sample size: ${sampleSize} chars)`);
-    console.log(`Sample text preview: "${sampleText.substring(0, 200)}..."`);
+    log.debug(`Analyzing page content (sample size: ${sampleSize} chars)`);
+    log.debug(`Sample text preview: "${sampleText.substring(0, 200)}..."`);
     
     // Count characters by language
     const chineseChars = (sampleText.match(/[\u4e00-\u9fff]/g) || []).length;
@@ -208,14 +209,14 @@ export function detectPageLanguage(): string {
     
     const totalChars = sampleText.length;
     
-    console.log(`Character counts:`);
-    console.log(`  Chinese: ${chineseChars}`);
-    console.log(`  Japanese: ${japaneseChars}`);
-    console.log(`  Korean: ${koreanChars}`);
-    console.log(`  Arabic: ${arabicChars}`);
-    console.log(`  Cyrillic: ${cyrillicChars}`);
-    console.log(`  Latin: ${latinChars}`);
-    console.log(`  Total: ${totalChars}`);
+    log.debug(`Character counts:`);
+    log.debug(`  Chinese: ${chineseChars}`);
+    log.debug(`  Japanese: ${japaneseChars}`);
+    log.debug(`  Korean: ${koreanChars}`);
+    log.debug(`  Arabic: ${arabicChars}`);
+    log.debug(`  Cyrillic: ${cyrillicChars}`);
+    log.debug(`  Latin: ${latinChars}`);
+    log.debug(`  Total: ${totalChars}`);
     
     // Calculate ratios
     const ratios = {
@@ -227,62 +228,62 @@ export function detectPageLanguage(): string {
         en: latinChars / totalChars
     };
     
-    console.log(`Language ratios:`);
+    log.debug(`Language ratios:`);
     Object.entries(ratios).forEach(([lang, ratio]) => {
-        console.log(`  ${lang}: ${(ratio * 100).toFixed(2)}%`);
+        log.debug(`  ${lang}: ${(ratio * 100).toFixed(2)}%`);
     });
     
     // Find the language with highest ratio
     const maxRatio = Math.max(...Object.values(ratios));
     const detectedLang = Object.keys(ratios).find(key => ratios[key as keyof typeof ratios] === maxRatio);
     
-    console.log(`Highest ratio: ${(maxRatio * 100).toFixed(2)}% for language: ${detectedLang}`);
+    log.debug(`Highest ratio: ${(maxRatio * 100).toFixed(2)}% for language: ${detectedLang}`);
     
     // Lower threshold for content analysis since it's now the primary method
     if (maxRatio > 0.05 && detectedLang) { // Reduced threshold to 5% for better detection
-        console.log(`✓ Page language detected from content analysis: ${detectedLang} (ratio: ${maxRatio.toFixed(3)})`);
+        log.debug(`✓ Page language detected from content analysis: ${detectedLang} (ratio: ${maxRatio.toFixed(3)})`);
         cachedPageLanguage = detectedLang;
         return detectedLang;
     } else {
-        console.log(`✗ No language with sufficient ratio (>5%) found`);
+        log.debug(`✗ No language with sufficient ratio (>5%) found`);
     }
     
     // Method 2: Check HTML lang attribute (FALLBACK)
     const htmlLang = document.documentElement.lang;
-    console.log(`HTML lang attribute: "${htmlLang}"`);
+    log.debug(`HTML lang attribute: "${htmlLang}"`);
     if (htmlLang) {
         const langCode = htmlLang.toLowerCase().substring(0, 2);
-        console.log(`Extracted lang code: "${langCode}"`);
+        log.debug(`Extracted lang code: "${langCode}"`);
         if (['zh', 'en', 'ja', 'ko', 'fr', 'de', 'es', 'ru', 'ar', 'pt', 'it', 'nl'].includes(langCode)) {
-            console.log(`✓ Page language detected from HTML lang attribute: ${langCode}`);
+            log.debug(`✓ Page language detected from HTML lang attribute: ${langCode}`);
             cachedPageLanguage = langCode;
             return langCode;
         } else {
-            console.log(`✗ Lang code "${langCode}" not in supported list`);
+            log.debug(`✗ Lang code "${langCode}" not in supported list`);
         }
     } else {
-        console.log("✗ No HTML lang attribute found");
+        log.debug("✗ No HTML lang attribute found");
     }
     
     // Method 3: Check meta tags (FALLBACK)
     const metaLang = document.querySelector('meta[http-equiv="content-language"]');
-    console.log(`Meta content-language tag:`, metaLang);
+    log.debug(`Meta content-language tag:`, metaLang);
     if (metaLang) {
         const langCode = metaLang.getAttribute('content')?.toLowerCase().substring(0, 2);
-        console.log(`Meta lang code: "${langCode}"`);
+        log.debug(`Meta lang code: "${langCode}"`);
         if (langCode && ['zh', 'en', 'ja', 'ko', 'fr', 'de', 'es', 'ru', 'ar', 'pt', 'it', 'nl'].includes(langCode)) {
-            console.log(`✓ Page language detected from meta tag: ${langCode}`);
+            log.debug(`✓ Page language detected from meta tag: ${langCode}`);
             cachedPageLanguage = langCode;
             return langCode;
         } else {
-            console.log(`✗ Meta lang code "${langCode}" not in supported list`);
+            log.debug(`✗ Meta lang code "${langCode}" not in supported list`);
         }
     } else {
-        console.log("✗ No meta content-language tag found");
+        log.debug("✗ No meta content-language tag found");
     }
     
     // Default to English if no clear language detected
-    console.log('✗ Page language not detected, defaulting to English');
+    log.debug('✗ Page language not detected, defaulting to English');
     cachedPageLanguage = 'en';
     return 'en';
 }
@@ -293,22 +294,22 @@ export function clearPageLanguageCache(): void {
 
 // Manual test function for debugging
 export function testLanguageDetection(): void {
-    console.log("=== Manual Language Detection Test ===");
+    log.debug("=== Manual Language Detection Test ===");
     clearPageLanguageCache();
     const detectedLang = detectPageLanguage();
-    console.log(`Final detected language: ${detectedLang}`);
-    console.log("=== Test Complete ===");
+    log.debug(`Final detected language: ${detectedLang}`);
+    log.debug("=== Test Complete ===");
 }
 
 // Test function for language-specific model selection
 export function testLanguageModelSelection(): void {
-    console.log("=== Language Model Selection Test ===");
+    log.debug("=== Language Model Selection Test ===");
     const languages = ['zh', 'en', 'ja', 'ko', 'ar', 'ru', 'fr', 'de', 'es'];
     languages.forEach(lang => {
         const model = getLanguageSpecificModel(lang);
-        console.log(`Language: ${lang} -> Model: ${model}`);
+        log.debug(`Language: ${lang} -> Model: ${model}`);
     });
-    console.log("=== Test Complete ===");
+    log.debug("=== Test Complete ===");
 }
 
 export function getLanguageSpecificModel(language: string): string {

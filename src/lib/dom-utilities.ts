@@ -1,6 +1,7 @@
 // This module should contain all the functions related to querying, manipulating, and checking elements in the Document Object Model (DOM).
 import { restoreOriginalText,createRewriteSpan } from './ui-components';
 import { currentSettings } from './state-management';
+import * as log from './logger';
 
 // Enhanced function to check if element is truly visible
 function isElementVisible(element: Element): boolean {
@@ -187,9 +188,9 @@ function applyRewritesToElement(
 
 // NEW: Function to update dark mode styling for existing rewritten elements
 function updateDarkModeStyling() {
-    console.log("Updating dark mode styling...");
+    log.debug("Updating dark mode styling...");
     const rewrittenSpans = document.querySelectorAll('.genshred-processed .genshred-rewritten');
-    console.log("Found rewritten spans:", rewrittenSpans); // ← 检查数量
+    log.debug("Found rewritten spans:", rewrittenSpans); // ← 检查数量
     rewrittenSpans.forEach((span) => {
         if (currentSettings.genShredDarkMode) {
             span.classList.add('genshred-dark-mode');

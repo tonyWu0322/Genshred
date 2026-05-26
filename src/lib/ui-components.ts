@@ -1,5 +1,6 @@
 import { currentSettings } from "./state-management";
 import { escapeHTML } from "./utilities";
+import * as log from "./logger";
 let tooltipElement:HTMLElement | null = null;
 let isTooltipVisible= false;
 let activeTooltipElement:HTMLElement|null=null;
@@ -107,7 +108,7 @@ function createRewriteSpan(originalText: string, rewrittenText: string): HTMLSpa
 
     containerSpan.addEventListener('click', (e) => {
         e.stopPropagation();
-        console.log("clicked! Toggling visibility via class...");
+        log.debug("clicked! Toggling visibility via class...");
     
         // 检查当前是否显示改写文本
         const isShowingRewritten = !originalHiddenSpan.classList.contains('genshred-visible');
@@ -122,7 +123,7 @@ function createRewriteSpan(originalText: string, rewrittenText: string): HTMLSpa
             originalHiddenSpan.classList.remove('genshred-visible');
         }
     
-        console.log("After toggle:", {
+        log.debug("After toggle:", {
             rewrittenHasVisible: rewrittenSpan.classList.contains('genshred-visible'),
             originalHasVisible: originalHiddenSpan.classList.contains('genshred-visible')
         });
@@ -132,14 +133,14 @@ function createRewriteSpan(originalText: string, rewrittenText: string): HTMLSpa
 }
 
 function restoreOriginalText() {
-    console.trace("🚨 restoreOriginalText was called!"); // ← 会打印调用栈
-    console.log("Restoring original text...");
+    log.debug("restoreOriginalText()");
+    log.debug("Restoring original text...");
     const containers = document.querySelectorAll("span.genshred-rewrite-container[data-original-text]");
-    console.log("Found containers:", containers);
+    log.debug("Found containers:", containers);
 
     containers.forEach((container) => {
         const originalText = container.getAttribute("data-original-text") || "";
-        console.log("Original text:", originalText);
+        log.debug("Original text:", originalText);
         const textNode = document.createTextNode(originalText);
         container.parentNode?.replaceChild(textNode, container);
     });
@@ -148,7 +149,7 @@ function restoreOriginalText() {
         el.classList.remove('genshred-processed');
     });
 
-    console.log("Original text restored");
+    log.debug("Original text restored");
 }
 
 // New function: applySingleRewriteToElement

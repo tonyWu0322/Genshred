@@ -24,6 +24,7 @@ import { STORAGE_KEYS, DEFAULT_SETTINGS, MIN_PARAGRAPH_LENGTH, MAX_PARAGRAPH_LEN
 import type { ProcessResponse, Settings } from './types';
 
 import { currentSettings, loadSettings, registerSettingsUpdateCallback } from '~src/lib/state-management';
+import * as log from './lib/logger';
 
 // lazyloading
 let intersectionObserver: IntersectionObserver | null = null;
@@ -112,7 +113,7 @@ initialize();
 
 // Callback for setting update
 function handleSettingsUpdate(newSettings: Settings) {
-    console.log("Reacting to settings update:", newSettings);
+    log.debug("Reacting to settings update:", newSettings);
 
     // This is where you put all the action logic that used to be in loadSettings and onChanged
     if (newSettings[STORAGE_KEYS.IS_ON]) {
@@ -159,20 +160,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     // NEW: Handle CLEAR_CACHE message (as discussed previously)
     if (message.type === "CLEAR_CACHE") {
-        console.log("Content script received CLEAR_CACHE message. Clearing chrome.storage.local cache.");
+        log.debug("Content script received CLEAR_CACHE message. Clearing chrome.storage.local cache.");
         // Clear all items that start with 'genshred_cache_' prefix
         chrome.storage.local.get(null, (items) => {
             const keysToRemove = Object.keys(items).filter(key => key.startsWith('genshred_cache_'));
             if (keysToRemove.length > 0) {
                 chrome.storage.local.remove(keysToRemove, () => {
-                    console.log(`Removed ${keysToRemove.length} items from cache.`);
+                    log.debug(`Removed ${keysToRemove.length} items from cache.`);
         // restoreOriginalText(); // Revert any changes on the page
         if (currentSettings[STORAGE_KEYS.IS_ON]) {
             processParagraphs(); // Re-process the page with current settings
         }
                 });
             } else {
-                console.log("No cache items found to remove.");
+                log.debug("No cache items found to remove.");
                 restoreOriginalText();
                 if (currentSettings[STORAGE_KEYS.IS_ON]) {
                     processParagraphs();
@@ -184,7 +185,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     // NEW: Handle CLEAR_ALL_REWRITES message
     if (message.type === "CLEAR_ALL_REWRITES") {
-        console.log("Content script received CLEAR_ALL_REWRITES message. Clearing all rewrites.");
+        log.debug("Content script received CLEAR_ALL_REWRITES message. Clearing all rewrites.");
         restoreOriginalText(); // Revert all changes on the page
         return false; // No async response needed
     }
@@ -207,7 +208,7 @@ function showRewriteButton(x: number, y: number) {
         });
         rewriteButton.addEventListener('click', (e) => {
             e.stopPropagation();
-            console.log('按钮被点击');
+            log.debug('Rewrite button clicked');
             handleRewriteSelectedText();
         });
         document.body.appendChild(rewriteButton);
@@ -228,19 +229,19 @@ function hideRewriteButton() {
 
 // 手动模式
 async function handleRewriteSelectedText() {
-    console.log("handleRewriteSelectedText function started."); // Add this line
+    log.debug("handleRewriteSelectedText started");
     if (!currentSelectionRange) {
-        console.log("handleRewriteSelectedText: No currentSelectionRange, returning."); // More specific log
+        log.debug("handleRewriteSelectedText: No currentSelectionRange, returning.");
         return;
     }
 
     const selectedText = currentSelectionRange.toString().trim();
     if (selectedText.length === 0) {
-        console.log("handleRewriteSelectedText: Selected text is empty, returning."); // More specific log
+        log.debug("handleRewriteSelectedText: Selected text is empty, returning.");
         return;
     }
 
-    console.log("Rewriting selected text:", selectedText);
+    log.debug("Rewriting selected text:", selectedText);
     // hideRewriteButton(); // Hide button immediately - REMOVED to prevent immediate disappearance after click
 
     // Get the last known position of the button before it's hidden or moved
@@ -258,17 +259,23 @@ async function handleRewriteSelectedText() {
         const selectedDifficulty = currentSettings[STORAGE_KEYS.DIFFICULTY_LEVEL] as string;
         const detectedlanguage = detectLanguage(selectedText);
         if (detectedlanguage === 'und') {
-            console.log("Manual rewrite - Undetected language, skipping.");
+            log.debug("Manual rewrite - Undetected language, skipping.");
             return;
         }
         const effectivePromptInstruction = await getPromptForDifficultyAndLanguage(selectedDifficulty, detectedlanguage);
         const effectiveCustomPromptTemplate = currentSettings[STORAGE_KEYS.CUSTOM_PROMPT];
-        console.log("Manual rewrite - Original sentence being sent:", selectedText);
-        console.log("Manual rewrite - Using prompt instruction:", effectivePromptInstruction);
-        console.log("Manual rewrite - Selected difficulty:", selectedDifficulty);
-        console.log("Manual rewrite - Detected language:", detectedlanguage);
+        log.debug("Manual rewrite context:", {
+            preview: selectedText.slice(0, 120),
+            effectivePromptInstruction,
+            selectedDifficulty,
+            detectedlanguage
+        });
         const result = await new Promise<ProcessResponse>((resolve) => {
             let promptToUse = effectivePromptInstruction;
+            log.messageIo("out", "PROCESS_TEXT_BLOCK (manual)", {
+                preview: selectedText.slice(0, 120),
+                userLevel: selectedDifficulty
+            });
             chrome.runtime.sendMessage(
                 {
                     type: "PROCESS_TEXT_BLOCK",
@@ -282,11 +289,12 @@ async function handleRewriteSelectedText() {
                 (response) => resolve(response)
             );
         });
-        console.log("Manual rewrite - Sentence sent to backend.");
-        console.log("Manual rewrite - Full response from backend:", result);
+        log.messageIo("in", "PROCESS_TEXT_BLOCK (manual)", result?.error ?? {
+            hasRewrite: !!result?.rewritten_sentences?.[0]?.rewritten_text
+        });
         if (result?.rewritten_sentences?.[0]) {
             const rewrittenText = result.rewritten_sentences[0].rewritten_text;
-            console.log("Manual rewrite - Rewritten text received:", rewrittenText);
+            log.debug("Manual rewrite - Rewritten text received:", rewrittenText);
             // 替换 loading 动画为最终改写内容
             if (loadingSpan.parentNode) {
                 loadingSpan.parentNode.replaceChild(createRewriteSpan(selectedText, rewrittenText), loadingSpan);
@@ -301,7 +309,7 @@ async function handleRewriteSelectedText() {
                 hideRewriteButton();
             }
         } else if (result?.error) {
-            console.error("Error rewriting selected text:", result.error);
+            log.error("Error rewriting selected text:", result.error);
             // 重新插入原文本
             if (loadingSpan.parentNode) {
                 loadingSpan.parentNode.replaceChild(document.createTextNode(selectedText), loadingSpan);
@@ -317,7 +325,7 @@ async function handleRewriteSelectedText() {
                 hideRewriteButton();
             }
         } else {
-            console.warn("No rewritten text received.");
+            log.warn("No rewritten text received.");
             // 重新插入原文本
             if (loadingSpan.parentNode) {
                 loadingSpan.parentNode.replaceChild(document.createTextNode(selectedText), loadingSpan);
@@ -334,7 +342,7 @@ async function handleRewriteSelectedText() {
             }
         }
     } catch (error) {
-        console.error("Error during manual text rewrite:", error);
+        log.error("Error during manual text rewrite:", error);
         // 重新插入原文本
         if (loadingSpan.parentNode) {
             loadingSpan.parentNode.replaceChild(document.createTextNode(selectedText), loadingSpan);
@@ -354,17 +362,21 @@ async function handleRewriteSelectedText() {
 
 function handleTextSelection(event: MouseEvent) {
     
-    console.log("handleTextSelection called, genShredManualSelect:", currentSettings.genShredManualSelect);
+    log.debug("handleTextSelection called, genShredManualSelect:", currentSettings.genShredManualSelect);
     
     // Ensure that currentSelectionRange is always set to the actual selection if genShredManualSelect
     const selection = window.getSelection();
       // ✅ 忽略光标点击（未选中任何文本）
       if (!selection || selection.isCollapsed) {
-        console.log("Selection is collapsed (caret move), ignoring...");
+        log.debug("Selection is collapsed (caret move), ignoring...");
         return;
     }
 
-    console.log("Selection:", selection, "rangeCount:", selection?.rangeCount, "isCollapsed:", selection?.isCollapsed, "genShredManualSelect:", currentSettings.genShredManualSelect);
+    log.debug("Selection update", {
+        rangeCount: selection?.rangeCount,
+        isCollapsed: selection?.isCollapsed,
+        genShredManualSelect: currentSettings.genShredManualSelect
+    });
 
     // See constants.ts
     // const MAX_PARAGRAPH_LENGTH = 1000; // Define a reasonable max length for selected text

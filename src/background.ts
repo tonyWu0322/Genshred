@@ -1,5 +1,39 @@
 // This script will now act as a proxy to forward messages to the backend server
 import { SERVER_URL } from "./config";
+import { buildProcessTextHeaders, resolveBackendEndpoints } from "./lib/backend-endpoints";
+import * as log from "./lib/logger";
+
+function buildFinalPrompt(
+  textBlock: string,
+  userLevel: string,
+  promptInstruction: string,
+  customPromptTemplate?: string
+): string {
+  if (userLevel === "Custom_1" && customPromptTemplate) {
+    return customPromptTemplate
+      .replace("{user_level}", userLevel)
+      .replace("{sentences_to_rewrite}", textBlock);
+  }
+  const finalPromptBase = `Rewrite the following sentence(s) for a user with language level ${userLevel}. ${promptInstruction}\n\n{sentences_to_rewrite}`;
+  return finalPromptBase.replace("{sentences_to_rewrite}", textBlock);
+}
+
+function buildProcessResponse(
+  textBlock: string,
+  rewrittenText: string,
+  originalIndex: number
+) {
+  return {
+    rewritten_sentences: [
+      {
+        original_text: textBlock,
+        rewritten_text: rewrittenText,
+        original_index: originalIndex
+      }
+    ],
+    error: null
+  };
+}
 
 // Function to generate or retrieve a unique user ID
 async function getUserId(): Promise<string> {
@@ -41,37 +75,104 @@ async function getPromptForDifficulty(difficultyLevel: string): Promise<string> 
 
 chrome.runtime.onMessage.addListener(
   (message, sender, sendResponse) => {
-    console.log("[bg] Received message:", message.type);
-    
+    log.messageIo("in", message.type);
+
     if (message.type === "PROCESS_TEXT_BLOCK") {
-      console.log("[bg info] PROCESS_TEXT_BLOCK message received")
       const { textBlock, numSentences, userLevel, promptInstruction, customPromptTemplate, originalIndex } = message;
-      console.log("[bg info] Text block:", textBlock);
-      console.log("[bg info] User level:", userLevel);
-      console.log("[bg info] Prompt instruction:", promptInstruction);
       
       // Handle async operation properly
       (async () => {
         try {
           const userId = await getUserId();
           const difficultyPrompt = await getPromptForDifficulty(userLevel);
-
-          const backendUrl = `${SERVER_URL}/process_text`;
+          const endpoints = await resolveBackendEndpoints();
+          const backendUrl = endpoints.processTextUrl;
           const requestBody = {
             userId: userId,
             text: textBlock,
             numSentences: numSentences,
             userLevel: userLevel,
-            promptInstruction: difficultyPrompt,
+            promptInstruction: promptInstruction || difficultyPrompt,
             customPromptTemplate: customPromptTemplate,
             originalIndex: originalIndex || 0
           };
-          console.log("[bg info] Sending request to backend:", backendUrl);
-          console.log("[bg info] Request body:", requestBody);
-          
+          log.debug("process_text", endpoints.mode, backendUrl);
+
+          if (endpoints.mode === "custom") {
+            const finalPromptText = buildFinalPrompt(
+              textBlock,
+              userLevel,
+              promptInstruction || difficultyPrompt,
+              customPromptTemplate
+            );
+            log.promptFull(finalPromptText);
+            const openAiPayload: Record<string, any> = {
+              model: endpoints.customLlmModel,
+              messages: [{ role: "user", content: finalPromptText }],
+              stream: false,
+              temperature: endpoints.customLlmTemperature,
+              top_p: endpoints.customLlmTopP
+            };
+            if (endpoints.customLlmMaxTokens > 0) {
+              openAiPayload.max_tokens = endpoints.customLlmMaxTokens;
+            }
+
+            log.net("out", `POST ${backendUrl}`, {
+              model: openAiPayload.model,
+              temperature: openAiPayload.temperature,
+              top_p: openAiPayload.top_p,
+              max_tokens: openAiPayload.max_tokens,
+              messages: openAiPayload.messages
+            });
+            const llmResponse = await fetch(backendUrl, {
+              method: "POST",
+              headers: buildProcessTextHeaders(endpoints.llmApiKey),
+              body: JSON.stringify(openAiPayload),
+              signal: AbortSignal.timeout(endpoints.customLlmTimeoutMs)
+            });
+
+            if (!llmResponse.ok) {
+              const errorText = await llmResponse.text();
+              sendResponse({ error: `[Process Text] Custom LLM error: ${llmResponse.status} - ${errorText}` });
+              return;
+            }
+
+            const rawLlmText = await llmResponse.text();
+            let llmData: any = null;
+            try {
+              llmData = JSON.parse(rawLlmText);
+            } catch {
+              sendResponse({
+                error: `[Process Text] Custom LLM returned non-JSON. url=${backendUrl}, preview=${rawLlmText.slice(0, 200)}`
+              });
+              return;
+            }
+
+            const rewrittenText = llmData?.choices?.[0]?.message?.content?.trim();
+            if (!rewrittenText) {
+              sendResponse({
+                error: `[Process Text] Invalid OpenAI-compatible response: missing choices[0].message.content`
+              });
+              return;
+            }
+
+            log.net("in", `POST ${backendUrl}`, llmData);
+            sendResponse(buildProcessResponse(textBlock, rewrittenText, originalIndex || 0));
+            return;
+          }
+
+          log.promptFull(
+            buildFinalPrompt(
+              textBlock,
+              userLevel,
+              promptInstruction || difficultyPrompt,
+              customPromptTemplate
+            )
+          );
+          log.net("out", `POST ${backendUrl}`, requestBody);
           const response = await fetch(backendUrl, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: buildProcessTextHeaders(endpoints.llmApiKey),
             body: JSON.stringify(requestBody)
           });
 
@@ -81,11 +182,29 @@ chrome.runtime.onMessage.addListener(
               return;
           }
 
-          const data = await response.json();
-          console.log("[bg info] Backend response data:", data);
+          // Some backends (wrong URL / reverse proxy / 404 redirect) may return HTML.
+          // Parse safely to avoid "Unexpected token '<'" JSON parse errors.
+          const rawText = await response.text();
+          let data: any = null;
+          try {
+            data = JSON.parse(rawText);
+          } catch {
+            log.error("Non-JSON backend response", {
+              url: backendUrl,
+              status: response.status,
+              contentType: response.headers.get("content-type"),
+              preview: rawText.slice(0, 200),
+            });
+            sendResponse({
+              error: `[Process Text] Backend returned non-JSON. url=${backendUrl}, status=${response.status}, contentType=${response.headers.get("content-type")}, preview=${rawText.slice(0, 200)}`,
+            });
+            return;
+          }
+
+          log.net("in", `POST ${backendUrl}`, data);
           sendResponse(data);
         } catch (err) {
-          console.error("[bg] Error in PROCESS_TEXT_BLOCK:", err);
+          log.error("Error in PROCESS_TEXT_BLOCK:", err);
           sendResponse({ error: `[Process Text] Frontend fetch error: ${err.message}` });
         }
       })();
@@ -95,12 +214,12 @@ chrome.runtime.onMessage.addListener(
 
     if (message.type === "SPLIT_SENTENCES") {
       const { text, language, model } = message;
-      console.log("[bg] Processing SPLIT_SENTENCES for text length:", text.length, "language:", language, "model:", model);
 
       // Handle async operation properly
       (async () => {
         try {
-          const backendUrl = `${SERVER_URL}/split_sentences`;
+          const endpoints = await resolveBackendEndpoints();
+          const backendUrl = endpoints.splitUrl;
           const body: any = { text };
           if (language) {
             body.language = language;
@@ -108,9 +227,14 @@ chrome.runtime.onMessage.addListener(
           if (model) {
             body.model = model;
           }
-          
-          console.log("[bg] Sending split_sentences request with body:", body);
-          
+
+          log.debug("split_sentences", endpoints.mode, backendUrl, {
+            textLen: text?.length,
+            language,
+            model
+          });
+          log.net("out", `POST ${backendUrl}`, body);
+
           const response = await fetch(backendUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -120,16 +244,32 @@ chrome.runtime.onMessage.addListener(
 
           if (!response.ok) {
             const errorText = await response.text();
-            console.error("[bg] Backend error for SPLIT_SENTENCES:", response.status, errorText);
+            log.error("Backend error for SPLIT_SENTENCES:", response.status, errorText);
             sendResponse({ error: `[Sentence Splitting] Backend error: ${response.status} - ${errorText}` });
             return;
           }
 
-          const data = await response.json();
-          console.log("[bg] SPLIT_SENTENCES success, sentences count:", data.sentences?.length || 0);
+          const rawText = await response.text();
+          let data: any = null;
+          try {
+            data = JSON.parse(rawText);
+          } catch {
+            log.error("Non-JSON backend response (split)", {
+              url: backendUrl,
+              status: response.status,
+              contentType: response.headers.get("content-type"),
+              preview: rawText.slice(0, 200),
+            });
+            sendResponse({
+              error: `[Sentence Splitting] Backend returned non-JSON. url=${backendUrl}, status=${response.status}, contentType=${response.headers.get("content-type")}, preview=${rawText.slice(0, 200)}`,
+            });
+            return;
+          }
+
+          log.net("in", `POST ${backendUrl}`, data);
           sendResponse(data);
         } catch (err) {
-          console.error("[bg] Error in SPLIT_SENTENCES:", err);
+          log.error("Error in SPLIT_SENTENCES:", err);
           sendResponse({ error: `[Sentence Splitting] Frontend fetch error: ${err.message}` });
         }
       })();
@@ -156,7 +296,7 @@ chrome.runtime.onMessage.addListener(
           });
           sendResponse({ success: true }); // Always send a response
         } catch (err) {
-          console.error("[bg] Error calling backend /track_event:", err);
+          log.error("Error calling backend /track_event:", err);
           sendResponse({ error: `[Track Event] Error: ${err.message}` });
         }
       })();
@@ -187,7 +327,7 @@ chrome.runtime.onMessage.addListener(
           const data = await response.json();
           sendResponse(data);
         } catch (err) {
-          console.error("[bg] Error in AI_CHAT_MESSAGE:", err);
+          log.error("Error in AI_CHAT_MESSAGE:", err);
           sendResponse({ error: `[AI Chat] Frontend fetch error: ${err.message}` });
         }
       })();
@@ -196,13 +336,13 @@ chrome.runtime.onMessage.addListener(
     }
 
     if (message.type === "ADJUST_TEXT") {
-      console.warn("ADJUST_TEXT message type is deprecated. Use PROCESS_TEXT_BLOCK instead.");
+      log.warn("ADJUST_TEXT message type is deprecated. Use PROCESS_TEXT_BLOCK instead.");
       sendResponse({ error: "ADJUST_TEXT message type deprecated." });
       return false; // No async operation needed
     }
 
     // If no message type matches, return false
-    console.warn("[bg] Unknown message type:", message.type);
+    log.warn("Unknown message type:", message.type);
     sendResponse({ error: `Unknown message type: ${message.type}` });
     return false;
   }

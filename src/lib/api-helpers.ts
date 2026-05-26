@@ -8,6 +8,7 @@ import { sha256,calculateComplexityScore, selectSentences, withTimeout, isChines
 import { createLoadingSpan,createRewriteSpan,applySingleRewriteToElement } from './ui-components';
 import { isElementVisible, getTextNodesWithOffsets,applyRewritesToElement } from './dom-utilities';
 import {franc} from "franc-min";
+import * as log from "./logger";
 
 export function detectLanguage(text){
     var detectedLanguage=franc(text);
@@ -20,7 +21,7 @@ export function detectLanguage(text){
         
         // If more than 30% of characters are Chinese, assume it's Chinese
         if (chineseCharCount > 0 && (chineseCharCount / totalCharCount) > 0.3) {
-            console.log("Manual Chinese detection: detected Chinese text");
+            log.debug("Manual Chinese detection: detected Chinese text");
             return 'zh';
         }
     }
@@ -29,42 +30,37 @@ export function detectLanguage(text){
 };
 
 async function processElement(element: HTMLElement) {
-    console.log(element.classList.contains('genshred-processing')? "processing: TTT" : "-ing: FFF");
-    console.log(element.classList.contains('genshred-processed')? "processed: TTT" : "-ed: FFF");
     if (element.classList.contains('genshred-processed') || element.classList.contains('genshred-processing')){
-        console.log("Skipping element: Already processed or in-progress.");
+        log.debug("Skipping element: Already processed or in-progress.");
         return;
     }
     element.classList.add('genshred-processing');
-    console.log(element.classList.contains('genshred-processing')? "TTT" : "FFF");
-    console.log("[New Attempt] Attempting to process element:", element.nodeName, element.textContent?.substring(0, 50) + "...");
-    console.log(element.classList);
-    console.log(114514);
+    log.debug("process element", element.nodeName, element.textContent?.substring(0, 50));
     try {
         if (!currentSettings[STORAGE_KEYS.IS_ON]) {
-            console.log("Skipping element: Plugin is OFF.");
+            log.debug("Skipping element: Plugin is OFF.");
             return;
         }
         // if (element.classList.contains('genshred-processed')) {
-        //     console.log("Skipping element: Already processed.");
+        //     log.debug("Skipping element: Already processed.");
         //     return;
         // }
         // if (element.classList.contains('genshred-processing')) {
-        //     console.log("Skipping element: Already processing.");
+        //     log.debug("Skipping element: Already processing.");
         //     return;
         // }
         if (element.closest('.genshred-rewrite-container')) {
-            console.log("Skipping element: Part of a rewritten block.");
+            log.debug("Skipping element: Part of a rewritten block.");
             return;
         }
         if (element.closest('.genshred-tooltip-container')) {
-            console.log("Skipping element: Part of the tooltip.");
+            log.debug("Skipping element: Part of the tooltip.");
             return;
         }
 
         // Double-check visibility before processing
         if (!isElementVisible(element)) {
-            console.log("Skipping element: Not visible.");
+            log.debug("Skipping element: Not visible.");
             element.classList.add('genshred-processed'); // Mark as processed to avoid re-checking
             return;
         }
@@ -78,7 +74,7 @@ async function processElement(element: HTMLElement) {
             element.closest('ul') ||
             element.closest('ol') ||
             element.closest('dl')) {
-            console.log("Skipping complex element (table/list):", element.tagName);
+            log.debug("Skipping complex element (table/list):", element.tagName);
             return;
         }
 
@@ -86,7 +82,7 @@ async function processElement(element: HTMLElement) {
         const childNodes = element.querySelectorAll('*');
         const maxChildNodes = 100; // Increased from 20 to 100 for better Chinese support
         if (childNodes.length > maxChildNodes) {
-            console.log(`Skipping element with too many child nodes: ${childNodes.length} (max: ${maxChildNodes})`);
+            log.debug(`Skipping element with too many child nodes: ${childNodes.length} (max: ${maxChildNodes})`);
             return;
         }
         function sentenceSpansMultipleNodes(sentence: string, textNodeMappings: Array<{ node: Text, start: number, end: number }>): boolean {
@@ -103,8 +99,8 @@ async function processElement(element: HTMLElement) {
             }
         
         const { fullText: textBlock, mappings: textNodeMappings } = getTextNodesWithOffsets(element);
-        console.log("Extracted text block from element:", textBlock.substring(0, 200) + "...");
-        console.log("Text block length:", textBlock.length);
+        log.debug("Extracted text block from element:", textBlock.substring(0, 200) + "...");
+        log.debug("Text block length:", textBlock.length);
 
         // Check for minimum and maximum paragraph length early
         // Get minimum paragraph length from settings
@@ -115,23 +111,23 @@ async function processElement(element: HTMLElement) {
             if (isChineseText(textBlock) && textBlock.length >= MIN_CHINESE_PARAGRAPH_LENGTH) {
                 // Chinese text with sufficient length, allow it
                 const chineseRatio = getChineseTextRatio(textBlock);
-                console.log(`Allowing Chinese text block with ${textBlock.length} chars (Chinese ratio: ${chineseRatio.toFixed(2)})`);
+                log.debug(`Allowing Chinese text block with ${textBlock.length} chars (Chinese ratio: ${chineseRatio.toFixed(2)})`);
             } else {
-                console.log(`Text block too short (${textBlock.length} chars), skipping. Min: ${minParagraphLength}`);
+                log.debug(`Text block too short (${textBlock.length} chars), skipping. Min: ${minParagraphLength}`);
                 return;
             }
         }
         if (textBlock.length > MAX_PARAGRAPH_LENGTH) {
-            console.log(`Text block too long (${textBlock.length} chars), skipping. Max: ${MAX_PARAGRAPH_LENGTH}`);
+            log.debug(`Text block too long (${textBlock.length} chars), skipping. Max: ${MAX_PARAGRAPH_LENGTH}`);
             return;
         }
         
-        console.log("Processing text block:", textBlock.substring(0, 50) + "...");
+        log.debug("Processing text block:", textBlock.substring(0, 50) + "...");
 
         // Mark as processing to prevent duplicate processing
         // element.classList.add('genshred-processing');
         let detectedlanguage = detectLanguage(textBlock)
-        console.log("Detected language:", detectedlanguage);
+        log.debug("Detected language:", detectedlanguage);
         if (detectedlanguage === 'und' || detectedlanguage === null) {
             // Check if it's Chinese text manually
             const chineseCharCount = (textBlock.match(/[\u4e00-\u9fff]/g) || []).length;
@@ -139,17 +135,17 @@ async function processElement(element: HTMLElement) {
             const chineseRatio = chineseCharCount / totalCharCount;
             
             if (chineseRatio > 0.3) {
-                console.log("Manual Chinese detection: detected Chinese text, using 'zh'");
+                log.debug("Manual Chinese detection: detected Chinese text, using 'zh'");
                 detectedlanguage = 'zh';
             } else {
-                console.log("Undetected language, but continuing with default language (en)");
+                log.debug("Undetected language, but continuing with default language (en)");
                 detectedlanguage = 'en';
             }
         }
         const userLangPrefs = await chrome.storage.local.get('genshred_ignore_languages');
         const ignoreLangs: string[] = userLangPrefs['genshred_ignore_languages'] || [];
         if (ignoreLangs.includes(detectedlanguage)) {
-            console.log(`Skipping element: Language ${detectedlanguage} is in user ignore list.`);
+            log.debug(`Skipping element: Language ${detectedlanguage} is in user ignore list.`);
             element.classList.add('genshred-processed');
             return;
         }
@@ -159,19 +155,19 @@ async function processElement(element: HTMLElement) {
         const effectivePromptInstruction = await getPromptForDifficultyAndLanguage(selectedDifficulty, detectedlanguage);
         const effectiveCustomPromptTemplate = currentSettings[STORAGE_KEYS.CUSTOM_PROMPT];
         
-        console.log("Using difficulty:", selectedDifficulty);
-        console.log("Using prompt instruction:", effectivePromptInstruction);
+        log.debug("Using difficulty:", selectedDifficulty);
+        log.debug("Using prompt instruction:", effectivePromptInstruction);
 
         // Create a unique hash for the cache key to handle long text blocks
         const textHash = await sha256(textBlock);
         const cacheKey = `genshred_cache_${textHash}_${selectedDifficulty}_${effectiveCustomPromptTemplate || 'no_custom_prompt'}_${currentSettings[STORAGE_KEYS.SENTENCE_COUNT]}`;
 
         const cachedData = await chrome.storage.local.get(cacheKey);
-        console.log("Checking cache for key:", cacheKey);
-        console.log("Cached data retrieved:", cachedData);
+        log.debug("Checking cache for key:", cacheKey);
+        log.debug("Cached data retrieved:", cachedData);
 
         if (cachedData[cacheKey]) {
-            console.log("Using cached response from chrome.storage.local for element:", textBlock.substring(0, 50) + "...");
+            log.debug("Using cached response from chrome.storage.local for element:", textBlock.substring(0, 50) + "...");
             const { processedSentences, allOriginalSentences } = cachedData[cacheKey];
             applyRewritesToElement(element, processedSentences, allOriginalSentences, textNodeMappings);
             element.classList.add('genshred-processed');
@@ -182,9 +178,14 @@ async function processElement(element: HTMLElement) {
         // Detect page language and get appropriate sentence splitting model
         const pageLanguage = detectPageLanguage();
         const sentenceModel = getLanguageSpecificModel(pageLanguage);
-        console.log(`Page language detected: ${pageLanguage}, using model: ${sentenceModel}`);
+        log.debug(`Page language detected: ${pageLanguage}, using model: ${sentenceModel}`);
 
         // Request sentence splitting from background script with language-specific model
+        log.messageIo("out", "SPLIT_SENTENCES", {
+            textLen: textBlock.length,
+            language: pageLanguage,
+            model: sentenceModel
+        });
         const splitResponse = await chrome.runtime.sendMessage({
             type: "SPLIT_SENTENCES",
             text: textBlock,
@@ -193,11 +194,12 @@ async function processElement(element: HTMLElement) {
         });
 
         if (splitResponse === undefined || splitResponse === null || splitResponse.error) {
-            console.error("Error splitting sentences via background script:", splitResponse?.error || "No response or unknown error");
+            log.error("Error splitting sentences via background script:", splitResponse?.error || "No response or unknown error");
             return; // Stop processing if sentence splitting fails
         }
         const sentences = splitResponse.sentences;
-        console.log(`Split text into ${sentences.length} sentences:`, sentences);
+        log.messageIo("in", "SPLIT_SENTENCES", { sentenceCount: sentences?.length });
+        log.debug(`Split text into ${sentences.length} sentences:`, sentences);
 
         // Replace the old mapping with runningOffset logic
         let runningOffset = 0;
@@ -216,13 +218,13 @@ async function processElement(element: HTMLElement) {
         const sentencesWithOriginalDataFiltered = sentencesWithOriginalData.filter(({ sentence }) => {
             const spansMultipleNodes = sentenceSpansMultipleNodes(sentence, textNodeMappings);
             if (spansMultipleNodes) {
-                console.log(`Skipping sentence that spans multiple text nodes: "${sentence.substring(0, 50)}..."`);
+                log.debug(`Skipping sentence that spans multiple text nodes: "${sentence.substring(0, 50)}..."`);
             }
             return !spansMultipleNodes;
         });
 
-        console.log(`Filtered ${sentencesWithOriginalData.length - sentencesWithOriginalDataFiltered.length} sentences that span multiple text nodes`);
-        console.log("Remaining sentences with calculated complexity scores:", sentencesWithOriginalDataFiltered);
+        log.debug(`Filtered ${sentencesWithOriginalData.length - sentencesWithOriginalDataFiltered.length} sentences that span multiple text nodes`);
+        log.debug("Remaining sentences with calculated complexity scores:", sentencesWithOriginalDataFiltered);
 
         // For Chinese text, process a reduced subset with extra filters and avoid long consecutive runs
         let sentencesToProcess;
@@ -266,16 +268,16 @@ async function processElement(element: HTMLElement) {
             }
 
             sentencesToProcess = selected;
-            console.log(`Chinese text detected: selecting ${sentencesToProcess.length}/${zhFiltered.length} (target ~${targetCount}) with no >2 consecutive.`);
+            log.debug(`Chinese text detected: selecting ${sentencesToProcess.length}/${zhFiltered.length} (target ~${targetCount}) with no >2 consecutive.`);
         } else {
             // Non-Chinese text: use percentage-based selection
             const percentageToRewrite = Number(currentSettings[STORAGE_KEYS.SENTENCE_COUNT]); // This is now a percentage (0-100)
             const numSentencesToRewrite = Math.round(sentencesWithOriginalDataFiltered.length * (percentageToRewrite / 100));
             sentencesToProcess = selectSentences(sentencesWithOriginalDataFiltered, numSentencesToRewrite);
-            console.log(`Non-Chinese text: selected ${sentencesToProcess.length} sentences for rewriting (${percentageToRewrite}%)`);
+            log.debug(`Non-Chinese text: selected ${sentencesToProcess.length} sentences for rewriting (${percentageToRewrite}%)`);
         }
 
-        console.log(`Processing ${sentencesToProcess.length} sentences:`, sentencesToProcess);
+        log.debug(`Processing ${sentencesToProcess.length} sentences:`, sentencesToProcess);
         const rewritePromises = sentencesToProcess.map(async({sentence, index, startIndex})=>{
             const loadingSpan = createLoadingSpan(sentence);
             applySingleRewriteToElement(element, sentence, '', startIndex, textNodeMappings, loadingSpan);
@@ -283,7 +285,11 @@ async function processElement(element: HTMLElement) {
             try {
                 const result = await withTimeout(new Promise<ProcessResponse>((resolve) => {
                     let promptToUse = effectivePromptInstruction;
-                    console.log("now processing:",sentence)
+                    log.messageIo("out", "PROCESS_TEXT_BLOCK", {
+                        preview: sentence.slice(0, 120),
+                        userLevel: selectedDifficulty,
+                        originalIndex: index
+                    });
                     chrome.runtime.sendMessage({
                             type: "PROCESS_TEXT_BLOCK",
                             textBlock: sentence,
@@ -297,6 +303,9 @@ async function processElement(element: HTMLElement) {
                         (response) => resolve(response)
                         );
                     }),10000);
+                log.messageIo("in", "PROCESS_TEXT_BLOCK", result?.error ?? {
+                    hasRewrite: !!result?.rewritten_sentences?.[0]?.rewritten_text
+                });
                 if (result?.rewritten_sentences?.[0]) {
                     const rewriteSpan = createRewriteSpan(sentence, result.rewritten_sentences[0].rewritten_text);
                     if (loadingSpan.parentNode) {
@@ -304,7 +313,7 @@ async function processElement(element: HTMLElement) {
                     }
                 }
             } catch (error) {
-                console.error("Error rewriting sentence:", error);
+                log.error("Error rewriting sentence:", error);
                 // The loading spinner will remain, but the outer process can continue.
                 // You could also replace the spinner with the original text here if desired.
                 if (loadingSpan.parentNode) {
@@ -316,12 +325,12 @@ async function processElement(element: HTMLElement) {
             // Wait for ALL promises to complete (either resolved or rejected)
             await Promise.allSettled(rewritePromises);
         } catch (error) {
-            console.error("Error in processElement:", error);
+            log.error("Error in processElement:", error);
         } finally {
             // This block will ALWAYS run after the try or catch block finishes.
             // It ensures the element's state is reset, regardless of individual sentence failures.
             element.classList.remove('genshred-processing');
-            console.log("process complete, add processed to:",element)
+            log.debug("process complete, add processed to:",element)
             element.classList.add('genshred-processed');
         }
     }
@@ -366,7 +375,7 @@ async function processElement(element: HTMLElement) {
 //             })();
 //         }
 //     } catch (error) {
-//         console.error("Error in processElement:", error);
+//         log.error("Error in processElement:", error);
 //         element.classList.remove('genshred-processing');
 //         element.classList.add('genshred-processed'); // 尝试应对重复改写
 //     }

@@ -3,6 +3,7 @@ import { STORAGE_KEYS, MAX_PARAGRAPH_LENGTH,MIN_PARAGRAPH_LENGTH, MIN_CHINESE_PA
 import { currentSettings } from './state-management';
 import { debounce, isChineseText, isMeaningfulChineseText, shouldSkipChineseElement, getChineseTextRatio } from './utilities';
 import { isElementVisible, isElementInViewport } from './dom-utilities';
+import * as log from './logger';
 // 添加MutationObserver来监听DOM变化 **注意添加动画后亦会触发**
 let mutationObserver: MutationObserver | null = null;
 // Define the variables here, scoped to this module
@@ -60,7 +61,7 @@ function startObservingDOMChanges() {
                     if (node.nodeType === Node.ELEMENT_NODE && 
                         (node as Element).closest('.genshred-processing')) {
                         // Ignore mutations within a processing element
-                        console.log("Ignoring mutation within a processing element.");
+                        log.debug("Ignoring mutation within a processing element.");
                         continue;
                     }
                     // Check if the added node is a root processed/rewritten element
@@ -68,7 +69,7 @@ function startObservingDOMChanges() {
                         ((node as Element).classList.contains('genshred-rewritten') ||
                          (node as Element).classList.contains('genshred-processed') ||
                          (node as Element).classList.contains('genshred-processing'))) {
-                        console.log("Ignoring mutation on a processed or in-progress element.");
+                        log.debug("Ignoring mutation on a processed or in-progress element.");
                         continue;
                     }
         
@@ -91,7 +92,7 @@ function startObservingDOMChanges() {
         
         // 如果需要处理，调用防抖版本的processParagraphs
         if (shouldProcess && currentSettings[STORAGE_KEYS.IS_ON]) {
-            console.log("DOM changes detected, processing new content...");
+            log.debug("DOM changes detected, processing new content...");
             isObserving=true;
             (async()=>{
                 await  debouncedProcessParagraphs();
@@ -110,7 +111,7 @@ function startObservingDOMChanges() {
     
     // 开始观察整个文档
     mutationObserver.observe(document.body, observerConfig);
-    console.log("Started observing DOM changes");
+    log.debug("Started observing DOM changes");
 }
 
 // 停止MutationObserver
@@ -118,7 +119,7 @@ function stopObservingDOMChanges() {
     if (mutationObserver) {
         mutationObserver.disconnect();
         mutationObserver = null;
-        console.log("Stopped observing DOM changes");
+        log.debug("Stopped observing DOM changes");
     }
 }
 
@@ -144,7 +145,7 @@ function setupIntersectionObserver() {
                     try {
                         await handleFoundElement(element);
                     } catch (error) {
-                        console.error("Error processing element:", error);
+                        log.error("Error processing element:", error);
                         element.classList.remove('genshred-processing');
                     }
                 }
@@ -171,18 +172,18 @@ function setupIntersectionObserver() {
 
 async function processParagraphs() {
     if (!currentSettings[STORAGE_KEYS.IS_ON]) {
-        console.log("Plugin is turned off");
+        log.debug("Plugin is turned off");
         return;
     }
     
     // Prevent overlapping processing calls
     if (isProcessing) {
-        console.log("Already processing, skipping this call");
+        log.debug("Already processing, skipping this call");
         return;
     }
     
     isProcessing = true;
-    console.log("Processing paragraphs...");
+    log.debug("Processing paragraphs...");
     
     // Select all potential text elements
     const textElements = Array.from(document.querySelectorAll("p, div, span, h1, h2, h3, h4, h5, h6, li, td, th"))
@@ -223,9 +224,9 @@ async function processParagraphs() {
                 if (isChineseText(chineseText) && trimmedTextLength >= MIN_CHINESE_PARAGRAPH_LENGTH) {
                     // Chinese text with sufficient length, allow it
                     const chineseRatio = getChineseTextRatio(chineseText);
-                    console.log(`Allowing Chinese element with ${trimmedTextLength} chars (Chinese ratio: ${chineseRatio.toFixed(2)})`);
+                    log.debug(`Allowing Chinese element with ${trimmedTextLength} chars (Chinese ratio: ${chineseRatio.toFixed(2)})`);
                 } else {
-                    console.log(`Filtering out element due to short text length (${trimmedTextLength} chars, min: ${minParagraphLength}):`, element.nodeName);
+                    log.debug(`Filtering out element due to short text length (${trimmedTextLength} chars, min: ${minParagraphLength}):`, element.nodeName);
                     if (element instanceof HTMLElement) {
                         element.classList.add('genshred-processed');
                     }
@@ -233,7 +234,7 @@ async function processParagraphs() {
                 }
             }
             if (trimmedTextLength > MAX_PARAGRAPH_LENGTH) {
-                console.log(`Filtering out element due to long text length (${trimmedTextLength} chars):`, element.nodeName);
+                log.debug(`Filtering out element due to long text length (${trimmedTextLength} chars):`, element.nodeName);
                 return false;
             }
 
@@ -266,54 +267,54 @@ async function processParagraphs() {
                 
                 // Rule 1: Must be meaningful Chinese text
                 if (!isMeaningfulChineseText(chineseText)) {
-                    console.log(`Filtering out Chinese element: not meaningful Chinese text`);
+                    log.debug(`Filtering out Chinese element: not meaningful Chinese text`);
                     return false;
                 }
                 
                 // Rule 2: Check for skip patterns
                 if (shouldSkipChineseElement(chineseText)) {
-                    console.log(`Filtering out Chinese element: matches skip pattern`);
+                    log.debug(`Filtering out Chinese element: matches skip pattern`);
                     return false;
                 }
                 
                 // Rule 3: Minimum Chinese characters
                 if (chineseCharCount < 5) {
-                    console.log(`Filtering out Chinese element: too few Chinese characters (${chineseCharCount})`);
+                    log.debug(`Filtering out Chinese element: too few Chinese characters (${chineseCharCount})`);
                     return false;
                 }
                 
-                console.log(`Chinese element passed all filters: ${chineseCharCount} chars, ratio: ${chineseRatio.toFixed(2)}`);
+                log.debug(`Chinese element passed all filters: ${chineseCharCount} chars, ratio: ${chineseRatio.toFixed(2)}`);
             } else if (hasLatinChars) {
                 // Original English logic for Latin text
                 if (totalCharCount > 0 && totalCharCount < 50) {
                     if (alphabeticCharCount / totalCharCount < 0.3) {
-                        console.log(`Filtering out Latin element: insufficient alphabetic characters`);
+                        log.debug(`Filtering out Latin element: insufficient alphabetic characters`);
                         return false;
                     }
                 }
             } else {
                 // No recognizable characters, likely code or symbols
-                console.log(`Filtering out element: no recognizable characters`);
+                log.debug(`Filtering out element: no recognizable characters`);
                 return false;
             }
             // In observers.ts, inside your element discovery loop:
             // Check if the potential element to process is inside a container that is already handled
             if (element.closest('.genshred-processed') || element.closest('.genshred-processing')) {
-                console.log("Skipping element because it is inside an already processed or in-progress container.");
+                log.debug("Skipping element because it is inside an already processed or in-progress container.");
                 return false;
             }
 
             return true;
         });
 
-    console.log(`Found ${textElements.length} new elements to process after initial filtering.`);
+    log.debug(`Found ${textElements.length} new elements to process after initial filtering.`);
 
     // Limit the number of elements processed at once to prevent performance issues
     const maxElementsPerBatch = 10; // reading mode deprecated
     const elementsToProcess = textElements.slice(0, maxElementsPerBatch);
     
     if (textElements.length > maxElementsPerBatch) {
-        console.log(`Processing ${elementsToProcess.length} elements out of ${textElements.length} total (performance optimization)`);
+        log.debug(`Processing ${elementsToProcess.length} elements out of ${textElements.length} total (performance optimization)`);
     }
 
     // Set up intersection observer if not already set up
@@ -338,7 +339,7 @@ async function processParagraphs() {
                 try {
                     await handleFoundElement(element);
                 } catch (error) {
-                    console.error("Error processing element:", error);
+                    log.error("Error processing element:", error);
                     element.classList.remove('genshred-processing');
                 }
             }

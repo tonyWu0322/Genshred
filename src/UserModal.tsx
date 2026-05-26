@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import './UserModal.css';
 import { SERVER_URL } from './config';
+import * as log from './lib/logger';
 
 interface UserModalProps {
   isOpen: boolean;
@@ -105,7 +106,7 @@ const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose }) => {
         setStatusMessage(data.message || '错误的账号或密码');
       }
     } catch (error) {
-      console.error('Login error:', error);
+      log.error('Login error:', error);
       setStatusMessage(`连接服务器失败，请确保后端服务器已启动 (${SERVER_URL})`);
     }
   };
@@ -139,7 +140,7 @@ const UserModal: React.FC<UserModalProps> = ({ isOpen, onClose }) => {
         setStatusMessage(data.message || '注册失败，请稍后再试');
       }
     } catch (error) {
-      console.error('Registration error:', error);
+      log.error('Registration error:', error);
       setStatusMessage(`连接服务器失败，请确保后端服务器已启动 (${SERVER_URL})`);
     }
   };

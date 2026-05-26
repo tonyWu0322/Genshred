@@ -8,7 +8,16 @@ const STORAGE_KEYS = {
     READING_MODE: 'genShredReadingMode', // Added for reading mode
     MANUAL_SELECT: 'genShredManualSelect', // Added for manual select mode
     HIDE_AI_CHAT: 'genShredHideAIChat', // Added for hiding AI chat feature
-    MIN_PARAGRAPH_LENGTH: 'genShredMinParagraphLength' // Added for minimum paragraph length setting
+    MIN_PARAGRAPH_LENGTH: 'genShredMinParagraphLength', // Added for minimum paragraph length setting
+    BACKEND_MODE: 'genShredBackendMode',
+    CUSTOM_SPLIT_URL: 'genShredCustomSplitUrl',
+    CUSTOM_LLM_URL: 'genShredCustomLlmUrl',
+    CUSTOM_LLM_API_KEY: 'genShredCustomLlmApiKey',
+    CUSTOM_LLM_MODEL: 'genShredCustomLlmModel',
+    CUSTOM_LLM_TEMPERATURE: 'genShredCustomLlmTemperature',
+    CUSTOM_LLM_TOP_P: 'genShredCustomLlmTopP',
+    CUSTOM_LLM_MAX_TOKENS: 'genShredCustomLlmMaxTokens',
+    CUSTOM_LLM_TIMEOUT_MS: 'genShredCustomLlmTimeoutMs'
 };
 
 const DEFAULT_SETTINGS = {
@@ -20,6 +29,15 @@ const DEFAULT_SETTINGS = {
     [STORAGE_KEYS.MANUAL_SELECT]: true, // Default to enabled manual select mode
     [STORAGE_KEYS.HIDE_AI_CHAT]: false, // Default to show AI chat feature
     [STORAGE_KEYS.MIN_PARAGRAPH_LENGTH]: 20, // Default minimum paragraph length
+    [STORAGE_KEYS.BACKEND_MODE]: 'official',
+    [STORAGE_KEYS.CUSTOM_SPLIT_URL]: '',
+    [STORAGE_KEYS.CUSTOM_LLM_URL]: '',
+    [STORAGE_KEYS.CUSTOM_LLM_API_KEY]: '',
+    [STORAGE_KEYS.CUSTOM_LLM_MODEL]: 'gpt-4o-mini',
+    [STORAGE_KEYS.CUSTOM_LLM_TEMPERATURE]: 0.7,
+    [STORAGE_KEYS.CUSTOM_LLM_TOP_P]: 0.7,
+    [STORAGE_KEYS.CUSTOM_LLM_MAX_TOKENS]: 512,
+    [STORAGE_KEYS.CUSTOM_LLM_TIMEOUT_MS]: 20000,
     [STORAGE_KEYS.DIFFICULTY_MAPPING]:  {
       "Easy": "Simplify vocabulary and sentence structure for a beginner (A2 CEFR level).",
       "Normal": "Rewrite for an intermediate English speaker (B2 CEFR level). Use clear and concise language.",

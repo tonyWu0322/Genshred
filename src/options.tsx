@@ -1,6 +1,7 @@
 // options.tsx
 import React, { useState, useEffect } from 'react';
 import { STORAGE_KEYS, DEFAULT_SETTINGS } from './constants'
+import { SERVER_URL } from './config'
 
 import './options.css';
 // We will not define the default custom prompt here for consistency
@@ -27,6 +28,11 @@ const DEFAULT_PROMPT_MATRIX = {
     Custom_1: { default: "Rewrite for a user with specific needs, as defined by the custom prompt below." }
 };
 
+function toFiniteNumber(value: unknown, fallback: number): number {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : fallback;
+}
+
 function Options() {
     const [customPrompt, setCustomPrompt] = useState(CUSTOM_PROMPT_DEFAULT);
     const [difficultyMapping, setDifficultyMapping] = useState({
@@ -40,6 +46,15 @@ function Options() {
     const [promptMatrix, setPromptMatrix] = useState<any>(DEFAULT_PROMPT_MATRIX);
     const [cellActive, setCellActive] = useState(false);
     const [minParagraphLength, setMinParagraphLength] = useState<number>(20);
+    const [backendMode, setBackendMode] = useState<'official' | 'custom'>('official');
+    const [customSplitUrl, setCustomSplitUrl] = useState('');
+    const [customLlmUrl, setCustomLlmUrl] = useState('');
+    const [customLlmApiKey, setCustomLlmApiKey] = useState('');
+    const [customLlmModel, setCustomLlmModel] = useState('gpt-4o-mini');
+    const [customLlmTemperature, setCustomLlmTemperature] = useState<number>(0.7);
+    const [customLlmTopP, setCustomLlmTopP] = useState<number>(0.7);
+    const [customLlmMaxTokens, setCustomLlmMaxTokens] = useState<number>(512);
+    const [customLlmTimeoutMs, setCustomLlmTimeoutMs] = useState<number>(20000);
     useEffect(() => {
         const loadSettings = async () => {
             const storedSettings = await chrome.storage.local.get([
@@ -47,13 +62,32 @@ function Options() {
                 'genShredDifficultyMapping',
                 'genshred_ignore_languages',
                 'genshred_prompt_matrix',
-                STORAGE_KEYS.MIN_PARAGRAPH_LENGTH
+                STORAGE_KEYS.MIN_PARAGRAPH_LENGTH,
+                STORAGE_KEYS.BACKEND_MODE,
+                STORAGE_KEYS.CUSTOM_SPLIT_URL,
+                STORAGE_KEYS.CUSTOM_LLM_URL,
+                STORAGE_KEYS.CUSTOM_LLM_API_KEY,
+                STORAGE_KEYS.CUSTOM_LLM_MODEL,
+                STORAGE_KEYS.CUSTOM_LLM_TEMPERATURE,
+                STORAGE_KEYS.CUSTOM_LLM_TOP_P,
+                STORAGE_KEYS.CUSTOM_LLM_MAX_TOKENS,
+                STORAGE_KEYS.CUSTOM_LLM_TIMEOUT_MS,
             ]);
             setCustomPrompt(storedSettings[STORAGE_KEYS.CUSTOM_PROMPT] ?? CUSTOM_PROMPT_DEFAULT);
             setDifficultyMapping(storedSettings['genShredDifficultyMapping'] ?? difficultyMapping);
             setIgnoreLangs(storedSettings['genshred_ignore_languages'] ?? []);
             setPromptMatrix(storedSettings['genshred_prompt_matrix'] ?? DEFAULT_PROMPT_MATRIX);
             setMinParagraphLength(storedSettings[STORAGE_KEYS.MIN_PARAGRAPH_LENGTH] ?? 20);
+            const bm = storedSettings[STORAGE_KEYS.BACKEND_MODE];
+            setBackendMode(bm === 'custom' ? 'custom' : 'official');
+            setCustomSplitUrl(storedSettings[STORAGE_KEYS.CUSTOM_SPLIT_URL] ?? '');
+            setCustomLlmUrl(storedSettings[STORAGE_KEYS.CUSTOM_LLM_URL] ?? '');
+            setCustomLlmApiKey(storedSettings[STORAGE_KEYS.CUSTOM_LLM_API_KEY] ?? '');
+            setCustomLlmModel(storedSettings[STORAGE_KEYS.CUSTOM_LLM_MODEL] ?? 'gpt-4o-mini');
+            setCustomLlmTemperature(toFiniteNumber(storedSettings[STORAGE_KEYS.CUSTOM_LLM_TEMPERATURE], 0.7));
+            setCustomLlmTopP(toFiniteNumber(storedSettings[STORAGE_KEYS.CUSTOM_LLM_TOP_P], 0.7));
+            setCustomLlmMaxTokens(toFiniteNumber(storedSettings[STORAGE_KEYS.CUSTOM_LLM_MAX_TOKENS], 512));
+            setCustomLlmTimeoutMs(toFiniteNumber(storedSettings[STORAGE_KEYS.CUSTOM_LLM_TIMEOUT_MS], 20000));
         };
         loadSettings();
     }, []);
@@ -64,7 +98,16 @@ function Options() {
             'genShredDifficultyMapping': difficultyMapping,
             'genshred_ignore_languages': ignoreLangs,
             'genshred_prompt_matrix': promptMatrix,
-            [STORAGE_KEYS.MIN_PARAGRAPH_LENGTH]: minParagraphLength
+            [STORAGE_KEYS.MIN_PARAGRAPH_LENGTH]: minParagraphLength,
+            [STORAGE_KEYS.BACKEND_MODE]: backendMode,
+            [STORAGE_KEYS.CUSTOM_SPLIT_URL]: customSplitUrl.trim(),
+            [STORAGE_KEYS.CUSTOM_LLM_URL]: customLlmUrl.trim(),
+            [STORAGE_KEYS.CUSTOM_LLM_API_KEY]: customLlmApiKey,
+            [STORAGE_KEYS.CUSTOM_LLM_MODEL]: customLlmModel.trim() || 'gpt-4o-mini',
+            [STORAGE_KEYS.CUSTOM_LLM_TEMPERATURE]: toFiniteNumber(customLlmTemperature, 0.7),
+            [STORAGE_KEYS.CUSTOM_LLM_TOP_P]: toFiniteNumber(customLlmTopP, 0.7),
+            [STORAGE_KEYS.CUSTOM_LLM_MAX_TOKENS]: toFiniteNumber(customLlmMaxTokens, 512),
+            [STORAGE_KEYS.CUSTOM_LLM_TIMEOUT_MS]: toFiniteNumber(customLlmTimeoutMs, 20000),
         });
         setStatusMessage('Settings saved!');
         setTimeout(() => setStatusMessage(''), 3000);
@@ -87,6 +130,15 @@ function Options() {
             "Custom_1": "Rewrite for a user with specific needs, as defined by the custom prompt below."
         });
         setMinParagraphLength(20);
+        setBackendMode('official');
+        setCustomSplitUrl('');
+        setCustomLlmUrl('');
+        setCustomLlmApiKey('');
+        setCustomLlmModel('gpt-4o-mini');
+        setCustomLlmTemperature(0.7);
+        setCustomLlmTopP(0.7);
+        setCustomLlmMaxTokens(512);
+        setCustomLlmTimeoutMs(20000);
         await chrome.storage.local.set({
             [STORAGE_KEYS.CUSTOM_PROMPT]: CUSTOM_PROMPT_DEFAULT,
             'genShredDifficultyMapping': { // Ensure full reset in storage
@@ -95,7 +147,16 @@ function Options() {
                 "Hard": "Rewrite for an advanced English speaker (C1 CEFR level). Use sophisticated vocabulary while maintaining clarity.",
                 "Custom_1": "Rewrite for a user with specific needs, as defined by the custom prompt below."
             },
-            [STORAGE_KEYS.MIN_PARAGRAPH_LENGTH]: 20
+            [STORAGE_KEYS.MIN_PARAGRAPH_LENGTH]: 20,
+            [STORAGE_KEYS.BACKEND_MODE]: DEFAULT_SETTINGS[STORAGE_KEYS.BACKEND_MODE],
+            [STORAGE_KEYS.CUSTOM_SPLIT_URL]: '',
+            [STORAGE_KEYS.CUSTOM_LLM_URL]: '',
+            [STORAGE_KEYS.CUSTOM_LLM_API_KEY]: '',
+            [STORAGE_KEYS.CUSTOM_LLM_MODEL]: 'gpt-4o-mini',
+            [STORAGE_KEYS.CUSTOM_LLM_TEMPERATURE]: 0.7,
+            [STORAGE_KEYS.CUSTOM_LLM_TOP_P]: 0.7,
+            [STORAGE_KEYS.CUSTOM_LLM_MAX_TOKENS]: 512,
+            [STORAGE_KEYS.CUSTOM_LLM_TIMEOUT_MS]: 20000,
         });
         setStatusMessage('Settings reset to defaults!');
         setTimeout(() => setStatusMessage(''), 3000);
@@ -125,12 +186,171 @@ function Options() {
             setMinParagraphLength(value);
         }
     };
+    const officialBase = SERVER_URL.replace(/\/+$/, '');
+
     return (
         <div className="options-container">
             <h1>Genshred Advanced Settings</h1>
 
             <section>
-                <h2>1. Custom Prompt Matrix (per Difficulty & Language)</h2>
+                <h2>1. Backend &amp; API Endpoints</h2>
+                <p>
+                    Choose the official bundled server or your own Parabasis-compatible backend.
+                    Sentence splitting and rewrite requests use the URLs below; track/chat still use the official base from build config.
+                </p>
+                <p style={{ fontSize: 13, color: '#555' }}>
+                    <strong>Official base (from build):</strong>{' '}
+                    <code>{officialBase}</code>
+                    <span style={{ marginLeft: 8 }}>→ <code>{officialBase}/split_sentences</code>, <code>{officialBase}/process_text</code></span>
+                </p>
+                <div style={{ marginBottom: 12 }}>
+                    <label style={{ marginRight: 16 }}>
+                        <input
+                            type="radio"
+                            name="backend-mode"
+                            checked={backendMode === 'official'}
+                            onChange={() => setBackendMode('official')}
+                        />{' '}
+                        Official server
+                    </label>
+                    <label>
+                        <input
+                            type="radio"
+                            name="backend-mode"
+                            checked={backendMode === 'custom'}
+                            onChange={() => setBackendMode('custom')}
+                        />{' '}
+                        Custom backend
+                    </label>
+                </div>
+                {backendMode === 'custom' && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 720 }}>
+                        <div>
+                            <label htmlFor="custom-split-url" style={{ display: 'block', fontWeight: 'bold', marginBottom: 4 }}>
+                                Sentence split endpoint (full URL)
+                            </label>
+                            <input
+                                id="custom-split-url"
+                                type="url"
+                                value={customSplitUrl}
+                                onChange={(e) => setCustomSplitUrl(e.target.value)}
+                                placeholder={`e.g. ${officialBase}/split_sentences`}
+                                style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
+                            />
+                            <small style={{ color: '#666' }}>Must accept POST JSON <code>{`{ text, language?, model? }`}</code> like Parabasis <code>/split_sentences</code>.</small>
+                        </div>
+                        <div>
+                            <label htmlFor="custom-llm-url" style={{ display: 'block', fontWeight: 'bold', marginBottom: 4 }}>
+                                Rewrite / LLM endpoint (full URL)
+                            </label>
+                            <input
+                                id="custom-llm-url"
+                                type="url"
+                                value={customLlmUrl}
+                                onChange={(e) => setCustomLlmUrl(e.target.value)}
+                                placeholder={`e.g. ${officialBase}/process_text`}
+                                style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
+                            />
+                            <small style={{ color: '#666' }}>
+                                OpenAI-compatible full endpoint, e.g. <code>https://api.openai.com/v1/chat/completions</code>.
+                            </small>
+                        </div>
+                        <div>
+                            <label htmlFor="custom-llm-api-key" style={{ display: 'block', fontWeight: 'bold', marginBottom: 4 }}>
+                                API key for rewrite (optional)
+                            </label>
+                            <input
+                                id="custom-llm-api-key"
+                                type="password"
+                                autoComplete="off"
+                                value={customLlmApiKey}
+                                onChange={(e) => setCustomLlmApiKey(e.target.value)}
+                                placeholder="Bearer token sent as Authorization header"
+                                style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
+                            />
+                            <small style={{ color: '#666' }}>If set, requests use <code>Authorization: Bearer &lt;your key&gt;</code>. Leave empty for no auth.</small>
+                        </div>
+                        <div>
+                            <label htmlFor="custom-llm-model" style={{ display: 'block', fontWeight: 'bold', marginBottom: 4 }}>
+                                Custom model ID
+                            </label>
+                            <input
+                                id="custom-llm-model"
+                                type="text"
+                                value={customLlmModel}
+                                onChange={(e) => setCustomLlmModel(e.target.value)}
+                                placeholder="e.g. gpt-4o-mini, deepseek-chat, qwen-plus"
+                                style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
+                            />
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(180px, 1fr))', gap: 12 }}>
+                            <div>
+                                <label htmlFor="custom-llm-temperature" style={{ display: 'block', fontWeight: 'bold', marginBottom: 4 }}>
+                                    Temperature
+                                </label>
+                                <input
+                                    id="custom-llm-temperature"
+                                    type="number"
+                                    min="0"
+                                    max="2"
+                                    step="0.1"
+                                    value={customLlmTemperature}
+                                    onChange={(e) => setCustomLlmTemperature(Number(e.target.value))}
+                                    style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
+                                />
+                            </div>
+                            <div>
+                                <label htmlFor="custom-llm-top-p" style={{ display: 'block', fontWeight: 'bold', marginBottom: 4 }}>
+                                    Top P
+                                </label>
+                                <input
+                                    id="custom-llm-top-p"
+                                    type="number"
+                                    min="0"
+                                    max="1"
+                                    step="0.1"
+                                    value={customLlmTopP}
+                                    onChange={(e) => setCustomLlmTopP(Number(e.target.value))}
+                                    style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
+                                />
+                            </div>
+                            <div>
+                                <label htmlFor="custom-llm-max-tokens" style={{ display: 'block', fontWeight: 'bold', marginBottom: 4 }}>
+                                    Max tokens
+                                </label>
+                                <input
+                                    id="custom-llm-max-tokens"
+                                    type="number"
+                                    min="1"
+                                    max="8192"
+                                    step="1"
+                                    value={customLlmMaxTokens}
+                                    onChange={(e) => setCustomLlmMaxTokens(Number(e.target.value))}
+                                    style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
+                                />
+                            </div>
+                            <div>
+                                <label htmlFor="custom-llm-timeout-ms" style={{ display: 'block', fontWeight: 'bold', marginBottom: 4 }}>
+                                    Timeout (ms)
+                                </label>
+                                <input
+                                    id="custom-llm-timeout-ms"
+                                    type="number"
+                                    min="1000"
+                                    max="120000"
+                                    step="1000"
+                                    value={customLlmTimeoutMs}
+                                    onChange={(e) => setCustomLlmTimeoutMs(Number(e.target.value))}
+                                    style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
+                                />
+                            </div>
+                        </div>
+                    </div>
+                )}
+            </section>
+
+            <section>
+                <h2>2. Custom Prompt Matrix (per Difficulty & Language)</h2>
                 <p>Specify custom prompts for each difficulty and language. If a cell is left empty, the default for that difficulty will be used.</p>
                 <table style={{ borderCollapse: 'collapse', width: '100%' }}>
                     <thead>
@@ -241,7 +461,7 @@ function Options() {
 
 
             <section>
-                <h2>2. Language Preferences</h2>
+                <h2>3. Language Preferences</h2>
                 <p>Select the languages you want to <b>ignore</b> (the extension will not rewrite these):</p>
                 {[
                     { code: 'en', name: 'English' },
@@ -264,7 +484,7 @@ function Options() {
                 </section>
 
             <section>
-                <h2>3. Minimum Paragraph Length</h2>
+                <h2>4. Minimum Paragraph Length</h2>
                 <p>Set the minimum character count for paragraphs to be processed. Smaller values will process more short paragraphs, larger values will only process longer paragraphs.</p>
                 <div style={{ marginBottom: '16px' }}>
                     <label htmlFor="min-paragraph-length" style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>
