@@ -2,9 +2,6 @@
 import './content.css';
 import { SERVER_URL } from "./config";
 import { franc } from 'franc-min';
-import AIChatWindow from '../components/AIChatWindow';
-import React from 'react';
-import * as ReactDOM from 'react-dom';
 import {convert3To2} from '../scripts/language_code_converter';
 
 
@@ -82,14 +79,6 @@ function initialize() {
     
     // 处理iframe内容
     handleIframes();
-
-    // Listen for storage changes to handle AI chat visibility
-    chrome.storage.onChanged.addListener((changes, namespace) => {
-        if (namespace === 'local' && changes[STORAGE_KEYS.HIDE_AI_CHAT]) {
-            // Re-inject or remove AI chat window based on new setting
-            injectAIChatWindow();
-        }
-    });
 
     // Clean up observers when page is unloaded
     window.addEventListener('unload', () => {
@@ -418,168 +407,19 @@ function replaceSelectionWithRewrittenText(range: Range, rewrittenText: string, 
     }
 }
 
-
-
-// Inject AIChatWindow into the page using a shadow DOM
-async function injectAIChatWindow() {
-    // Check if AI chat should be hidden
-    const settings = await chrome.storage.local.get([STORAGE_KEYS.HIDE_AI_CHAT]);
-    const hideAIChat = settings[STORAGE_KEYS.HIDE_AI_CHAT] ?? DEFAULT_SETTINGS[STORAGE_KEYS.HIDE_AI_CHAT];
-    
-    if (hideAIChat) {
-        // Remove existing chat window if it exists
-        const existingContainer = document.getElementById('genshred-ai-chat-root');
-        if (existingContainer) {
-            existingContainer.remove();
-        }
-        return;
+// Clean up any AI chat root left over from previous extension versions.
+// The chat surface has been removed entirely; this just sweeps the DOM so
+// upgrading users don't see a stranded floating button while the new content
+// script initializes.
+function removeLegacyAIChatRoot() {
+    const existing = document.getElementById('genshred-ai-chat-root');
+    if (existing) {
+        existing.remove();
     }
-
-    if (document.getElementById('genshred-ai-chat-root')) return; // Prevent double-injection
-    const container = document.createElement('div');
-    container.id = 'genshred-ai-chat-root';
-    container.style.position = 'fixed';
-    container.style.zIndex = '2147483647';
-    container.style.all = 'unset';
-    document.body.appendChild(container);
-
-    // Use shadow DOM to avoid style conflicts
-    const shadow = container.attachShadow({ mode: 'open' });
-    const mountPoint = document.createElement('div');
-    shadow.appendChild(mountPoint);
-
-    // Inject CSS into shadow root (inline for reliability)
-    const style = document.createElement('style');
-    style.textContent = `
-.ai-chat-fab {
-  position: fixed;
-  bottom: 32px;
-  right: 32px;
-  z-index: 9999;
-  background: #1976d2;
-  color: #fff;
-  border: none;
-  border-radius: 50%;
-  width: 56px;
-  height: 56px;
-  font-size: 2rem;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.18);
-  cursor: pointer;
-  transition: background 0.2s;
-}
-.ai-chat-fab:hover {
-  background: #1565c0;
 }
 
-.ai-chat-window {
-  position: fixed;
-  bottom: 32px;
-  right: 32px;
-  width: 340px;
-  max-width: 95vw;
-  height: 420px;
-  max-height: 80vh;
-  background: #fff;
-  border-radius: 12px;
-  box-shadow: 0 4px 24px rgba(0,0,0,0.18);
-  z-index: 10000;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  font-family: system-ui, sans-serif;
-}
-
-.ai-chat-header {
-  background: #1976d2;
-  color: #fff;
-  padding: 12px 16px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-weight: bold;
-  font-size: 1.1rem;
-}
-.ai-chat-close {
-  background: none;
-  border: none;
-  color: #fff;
-  font-size: 1.3rem;
-  cursor: pointer;
-  margin-left: 8px;
-}
-
-.ai-chat-history {
-  flex: 1;
-  padding: 12px;
-  overflow-y: auto;
-  background: #f7f7fa;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.ai-chat-msg {
-  padding: 8px 12px;
-  border-radius: 16px;
-  max-width: 80%;
-  word-break: break-word;
-  font-size: 1rem;
-  line-height: 1.4;
-}
-.ai-chat-msg-user {
-  align-self: flex-end;
-  background: #e3f2fd;
-  color: #1976d2;
-}
-.ai-chat-msg-ai {
-  align-self: flex-start;
-  background: #fff;
-  color: #333;
-  border: 1px solid #e0e0e0;
-}
-
-.ai-chat-input-row {
-  display: flex;
-  padding: 10px 12px;
-  background: #f1f1f5;
-  border-top: 1px solid #e0e0e0;
-}
-.ai-chat-input {
-  flex: 1;
-  padding: 8px 10px;
-  border: 1px solid #bdbdbd;
-  border-radius: 8px;
-  font-size: 1rem;
-  outline: none;
-  margin-right: 8px;
-}
-.ai-chat-send {
-  background: #1976d2;
-  color: #fff;
-  border: none;
-  border-radius: 8px;
-  padding: 0 18px;
-  font-size: 1rem;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-.ai-chat-send:disabled {
-  background: #bdbdbd;
-  cursor: not-allowed;
-}
-.ai-chat-send:not(:disabled):hover {
-  background: #1565c0;
-}
-`;
-    shadow.appendChild(style);
-
-    ReactDOM.render(React.createElement(AIChatWindow), mountPoint);
-}
-
-
-// Call injectAIChatWindow on page load
 if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', injectAIChatWindow);
+    document.addEventListener('DOMContentLoaded', removeLegacyAIChatRoot);
 } else {
-    injectAIChatWindow();
+    removeLegacyAIChatRoot();
 }

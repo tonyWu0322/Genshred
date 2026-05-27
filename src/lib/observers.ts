@@ -1,353 +1,454 @@
+// Observer-based DOM discovery and lazy processing.
+//
+// Pipeline:
+//   1. `walkAndLabelElement` traverses the document body once and tags
+//      paragraph-like elements with `data-genshred-paragraph`.
+//   2. We collect the top-level paragraphs (including those inside open
+//      shadow roots), apply Genshred's length / language filters, and queue
+//      each candidate for the IntersectionObserver.
+//   3. When a paragraph enters the viewport (within `rootMargin`), we
+//      forward it to `processElement()` which handles sentence splitting and
+//      AI rewriting. This is unchanged from the previous design and keeps
+//      the rewrite UX intact.
+//   4. A MutationObserver watches both structural (`childList`) and
+//      visibility (`style`/`class`/`hidden`/`aria-hidden`) changes so SPA
+//      route changes, accordions and lazy-loaded sections are picked up.
+//
+// The walk-and-label approach (vs. the previous `querySelectorAll('p, div,
+// span, ...')`) is what gives us better adaptation to non-traditional sites
+// like deepwiki, Discord, Reddit, and Immersive-Translation-style apps.
+
 import { processElement } from './api-helpers';
-import { STORAGE_KEYS, MAX_PARAGRAPH_LENGTH,MIN_PARAGRAPH_LENGTH, MIN_CHINESE_PARAGRAPH_LENGTH } from '~src/constants';
+import { STORAGE_KEYS, MAX_PARAGRAPH_LENGTH, MIN_PARAGRAPH_LENGTH, MIN_CHINESE_PARAGRAPH_LENGTH } from '~src/constants';
 import { currentSettings } from './state-management';
-import { debounce, isChineseText, isMeaningfulChineseText, shouldSkipChineseElement, getChineseTextRatio } from './utilities';
-import { isElementVisible, isElementInViewport } from './dom-utilities';
+import {
+    debounce,
+    isChineseText,
+    isMeaningfulChineseText,
+    shouldSkipChineseElement,
+    getChineseTextRatio,
+} from './utilities';
+import {
+    clearMainContentContainerCache,
+    collectParagraphElementsDeep,
+    filterTopLevelParagraphs,
+    hasNoWalkAncestor,
+    isDontWalkIntoAndDontTranslateAsChildElement,
+    isDontWalkIntoButTranslateAsChildElement,
+    isElementInViewport,
+    isHTMLElement,
+    isStructurallyVisible,
+    walkAndLabelElement,
+} from './dom-utilities';
+import {
+    PARAGRAPH_ATTRIBUTE,
+    PROCESSED_CLASS,
+    PROCESSING_CLASS,
+    REWRITE_CONTAINER_CLASS,
+    TOOLTIP_CONTAINER_CLASS,
+    WALKED_ATTRIBUTE,
+} from './dom-rules';
 import * as log from './logger';
-// 添加MutationObserver来监听DOM变化 **注意添加动画后亦会触发**
-let mutationObserver: MutationObserver | null = null;
-// Define the variables here, scoped to this module
+
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
 let intersectionObserver: IntersectionObserver | null = null;
+let mutationObservers: MutationObserver[] = [];
+
 const observedElements = new WeakSet<Element>();
-let isObserving = true;
+const walkBlockedElements = new WeakSet<HTMLElement>();
+let walkId: string = '';
 let isProcessing = false;
-let elementQueue: HTMLElement[]=[];
+
+// Sentinel that tells us whether the observers are currently armed. The
+// previous implementation conflated "is the page being mutated by us" with
+// "should we ignore mutations" -- here we use a single, clearer flag.
+let internalMutationDepth = 0;
+
+// Element queue for sequential processing. processElement is async-heavy
+// (LLM round-trip) so we serialize it; the IntersectionObserver controls
+// admission to the queue.
+let elementQueue: HTMLElement[] = [];
 let isProcessingQueue = false;
-// Function to start processing the queue
+
+// ---------------------------------------------------------------------------
+// Walk ID generator
+// ---------------------------------------------------------------------------
+function newWalkId(): string {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+        return crypto.randomUUID();
+    }
+    // Fallback for older browsers / iframes without crypto access.
+    return `genshred-walk-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+// ---------------------------------------------------------------------------
+// Queue
+// ---------------------------------------------------------------------------
 async function processQueue() {
-    if (isProcessingQueue) {
-        return;
-    }
+    if (isProcessingQueue) return;
     isProcessingQueue = true;
-
-    while (elementQueue.length > 0) {
-        const element = elementQueue.shift();
-        if (element) {
-            await processElement(element);
+    try {
+        while (elementQueue.length > 0) {
+            const element = elementQueue.shift();
+            if (!element || !element.isConnected) continue;
+            if (element.classList.contains(PROCESSED_CLASS)) continue;
+            try {
+                await processElement(element);
+            }
+            catch (err) {
+                log.error('Error processing element from queue:', err);
+                element.classList.remove(PROCESSING_CLASS);
+            }
         }
     }
-    
-    isProcessingQueue = false;
+    finally {
+        isProcessingQueue = false;
+    }
 }
-// In your MutationObserver and IntersectionObserver callbacks:
-// Instead of calling processElement directly, add to the queue.
+
 function handleFoundElement(element: HTMLElement) {
-    if (!elementQueue.includes(element) && !element.classList.contains('genshred-processed')) {
-        elementQueue.push(element);
-        processQueue(); // Start or continue processing
-    }
+    if (!element.isConnected) return;
+    if (element.classList.contains(PROCESSED_CLASS)) return;
+    if (element.classList.contains(PROCESSING_CLASS)) return;
+    if (elementQueue.includes(element)) return;
+    elementQueue.push(element);
+    void processQueue();
 }
 
-function startObservingDOMChanges() {
-    if (mutationObserver) {
-        mutationObserver.disconnect();
-    }
-    
-    // 创建一个防抖版本的processParagraphs
-    const debouncedProcessParagraphs = debounce(processParagraphs, 500);
-    
-    // 创建MutationObserver实例
-    mutationObserver = new MutationObserver((mutations) => {
-        if (isObserving){
-            return;
+// ---------------------------------------------------------------------------
+// Filtering
+// ---------------------------------------------------------------------------
+// The walk-and-label step decides whether a node is structurally a
+// paragraph; this filter applies the AI-specific business rules (length,
+// language, complexity heuristics, "interesting" content).
+function isCandidateParagraph(element: HTMLElement): boolean {
+    if (!element.isConnected) return false;
+    // Structural visibility only: off-screen paragraphs are still valid
+    // candidates so the IntersectionObserver can lazily translate them.
+    if (!isStructurallyVisible(element)) return false;
+
+    if (element.classList.contains(PROCESSED_CLASS)) return false;
+    if (element.classList.contains(PROCESSING_CLASS)) return false;
+    if (element.closest(`.${REWRITE_CONTAINER_CLASS}`)) return false;
+    if (element.closest(`.${TOOLTIP_CONTAINER_CLASS}`)) return false;
+    if (observedElements.has(element)) return false;
+
+    const text = element.textContent ?? '';
+    const trimmedLen = text.trim().length;
+
+    const minLen = currentSettings.genShredMinParagraphLength ?? MIN_PARAGRAPH_LENGTH;
+    if (trimmedLen < minLen) {
+        if (isChineseText(text) && trimmedLen >= MIN_CHINESE_PARAGRAPH_LENGTH) {
+            const ratio = getChineseTextRatio(text);
+            log.debug(`Allowing Chinese paragraph (${trimmedLen} chars, ratio: ${ratio.toFixed(2)})`);
         }
-        let shouldProcess = false;
-        
-        // 检查是否有相关变化需要处理
-        for (const mutation of mutations) {
-            if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
-                for (const node of Array.from(mutation.addedNodes)) {
-                    // Check if the added node is a child of an element we're currently processing
-                    if (node.nodeType === Node.ELEMENT_NODE && 
-                        (node as Element).closest('.genshred-processing')) {
-                        // Ignore mutations within a processing element
-                        log.debug("Ignoring mutation within a processing element.");
-                        continue;
-                    }
-                    // Check if the added node is a root processed/rewritten element
-                    if (node.nodeType === Node.ELEMENT_NODE &&
-                        ((node as Element).classList.contains('genshred-rewritten') ||
-                         (node as Element).classList.contains('genshred-processed') ||
-                         (node as Element).classList.contains('genshred-processing'))) {
-                        log.debug("Ignoring mutation on a processed or in-progress element.");
-                        continue;
-                    }
-        
-                    // All other added elements should trigger a process
-                    shouldProcess = true;
-                    break;
-                }
-            }
-            
-            // Original attribute/characterData logic can remain, but be cautious
-            // The `mutation.target` is the element where the change happened.
-            // Ensure you're not re-processing an element that is part of a rewritten block.
-            if ((mutation.type === 'attributes' || mutation.type === 'characterData') && 
-                !mutation.target.parentElement?.closest('.genshred-rewrite-container')) {
-                shouldProcess = true;
-            }
-            
-            if (shouldProcess) break;
-        } ;
-        
-        // 如果需要处理，调用防抖版本的processParagraphs
-        if (shouldProcess && currentSettings[STORAGE_KEYS.IS_ON]) {
-            log.debug("DOM changes detected, processing new content...");
-            isObserving=true;
-            (async()=>{
-                await  debouncedProcessParagraphs();
-                isObserving =false;
-            });
+        else {
+            element.classList.add(PROCESSED_CLASS);
+            return false;
         }
-    });
-    
-    // 配置观察选项
-    const observerConfig = {
-        childList: true,     // 观察子节点的添加或删除
-        subtree: true,       // 观察所有后代节点
-        attributes: false,    // 不观察属性变化
-        characterData: true  // 观察文本内容变化
-    };
-    
-    // 开始观察整个文档
-    mutationObserver.observe(document.body, observerConfig);
-    log.debug("Started observing DOM changes");
-}
-
-// 停止MutationObserver
-function stopObservingDOMChanges() {
-    if (mutationObserver) {
-        mutationObserver.disconnect();
-        mutationObserver = null;
-        log.debug("Stopped observing DOM changes");
     }
+    if (trimmedLen > MAX_PARAGRAPH_LENGTH) return false;
+
+    // "Looks like content" heuristics. The walk already excludes inputs,
+    // editable areas, scripts, etc. -- this is a final guardrail.
+    if (element.closest('svg') || element.closest('canvas')) return false;
+
+    const alphabeticCount = (text.match(/[a-zA-Z]/g) || []).length;
+    const chineseCount = (text.match(/[\u4e00-\u9fff]/g) || []).length;
+
+    if (chineseCount > 0) {
+        if (!isMeaningfulChineseText(text)) return false;
+        if (shouldSkipChineseElement(text)) return false;
+        if (chineseCount < 5) return false;
+    }
+    else if (alphabeticCount > 0) {
+        if (text.length > 0 && text.length < 50) {
+            if (alphabeticCount / text.length < 0.3) return false;
+        }
+    }
+    else {
+        // Numbers / symbols only.
+        return false;
+    }
+
+    return true;
 }
 
+// ---------------------------------------------------------------------------
+// IntersectionObserver
+// ---------------------------------------------------------------------------
 function setupIntersectionObserver() {
-    if (intersectionObserver) {
-        intersectionObserver.disconnect();
-    }
+    if (intersectionObserver) return;
 
     intersectionObserver = new IntersectionObserver(
         async (entries) => {
             for (const entry of entries) {
-                const element = entry.target as HTMLElement;
-                
-                // Skip if plugin is off or element is already processed
-                if (!currentSettings[STORAGE_KEYS.IS_ON] || 
-                    element.classList.contains('genshred-processed') ||
-                    element.classList.contains('genshred-processing')) {
+                if (!entry.isIntersecting) continue;
+                const element = entry.target;
+                if (!isHTMLElement(element)) {
+                    intersectionObserver?.unobserve(element);
                     continue;
                 }
-
-                // Process if element is entering viewport
-                if (entry.isIntersecting) {
-                    try {
-                        await handleFoundElement(element);
-                    } catch (error) {
-                        log.error("Error processing element:", error);
-                        element.classList.remove('genshred-processing');
-                    }
+                if (!currentSettings[STORAGE_KEYS.IS_ON]
+                    || element.classList.contains(PROCESSED_CLASS)
+                    || element.classList.contains(PROCESSING_CLASS)) {
+                    intersectionObserver?.unobserve(element);
+                    continue;
                 }
+                handleFoundElement(element);
+                intersectionObserver?.unobserve(element);
             }
         },
         {
-            rootMargin: '2000px 0px',
-            threshold: [0, 0.1]
-        }
+            // 600px matches read-frog's default and is a good trade-off
+            // between "translate before user notices" and "don't waste tokens
+            // on content the user will never see".
+            rootMargin: '600px 0px',
+            threshold: 0.1,
+        },
     );
-
-    // Add scroll event listener for dynamic content
-    const handleScroll = debounce(() => {
-        if (currentSettings[STORAGE_KEYS.IS_ON]) {
-            processParagraphs();
-        }
-    }, 200); // readingmode deprecated
-
-    // Remove existing listener if any
-    window.removeEventListener('scroll', handleScroll);
-    // Add new scroll listener
-    window.addEventListener('scroll', handleScroll, { passive: true });
 }
 
+function observeParagraph(element: HTMLElement) {
+    setupIntersectionObserver();
+    if (observedElements.has(element)) return;
+    observedElements.add(element);
+    intersectionObserver?.observe(element);
+
+    // Already inside the viewport (with buffer)? Schedule immediately so we
+    // don't wait for a scroll event.
+    if (isElementInViewport(element)) {
+        handleFoundElement(element);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Walk container (entry-point used by initial run + mutations)
+// ---------------------------------------------------------------------------
+function shouldSkipContainer(container: HTMLElement): boolean {
+    // A container can be unwalkable for the same reasons individual elements
+    // can: it's inside a "don't walk" subtree, it's hidden, it's editable, ...
+    if (hasNoWalkAncestor(container)) return true;
+    if (isDontWalkIntoButTranslateAsChildElement(container)) return true;
+    if (isDontWalkIntoAndDontTranslateAsChildElement(container)) return true;
+    return false;
+}
+
+function discoverAndObserveParagraphs(container: HTMLElement) {
+    if (!walkId) walkId = newWalkId();
+    if (shouldSkipContainer(container)) return;
+
+    walkAndLabelElement(container, walkId);
+
+    let paragraphs: HTMLElement[];
+    if (container.hasAttribute(PARAGRAPH_ATTRIBUTE)
+        && container.getAttribute(WALKED_ATTRIBUTE) === walkId) {
+        paragraphs = [container];
+    }
+    else {
+        const collected = collectParagraphElementsDeep(container, walkId);
+        paragraphs = filterTopLevelParagraphs(container, collected);
+    }
+
+    for (const el of paragraphs) {
+        if (!isCandidateParagraph(el)) continue;
+        observeParagraph(el);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Walk-blocked element cache (accordion / hidden-then-shown handling)
+// ---------------------------------------------------------------------------
+function isWalkBlocked(element: HTMLElement): boolean {
+    return isDontWalkIntoButTranslateAsChildElement(element)
+        || isDontWalkIntoAndDontTranslateAsChildElement(element);
+}
+
+function recordBlockedDescendants(root: HTMLElement) {
+    if (isWalkBlocked(root)) walkBlockedElements.add(root);
+    const all = root.querySelectorAll<HTMLElement>('*');
+    for (const el of Array.from(all)) {
+        if (isWalkBlocked(el)) walkBlockedElements.add(el);
+    }
+}
+
+function didTransitionToWalkable(element: HTMLElement): boolean {
+    const wasBlocked = walkBlockedElements.has(element);
+    const isBlockedNow = isWalkBlocked(element);
+    if (isBlockedNow) walkBlockedElements.add(element);
+    else walkBlockedElements.delete(element);
+    return wasBlocked && !isBlockedNow;
+}
+
+// ---------------------------------------------------------------------------
+// MutationObserver
+// ---------------------------------------------------------------------------
+const debouncedFullScan = debounce(() => {
+    if (!currentSettings[STORAGE_KEYS.IS_ON]) return;
+    void processParagraphs();
+}, 300);
+
+function isWalkabilityAttribute(attr: string | null): boolean {
+    return attr === 'style' || attr === 'class' || attr === 'hidden' || attr === 'aria-hidden';
+}
+
+function isMutationFromOurInjection(target: Node): boolean {
+    if (!isHTMLElement(target)) return false;
+    if (target.classList.contains(REWRITE_CONTAINER_CLASS)) return true;
+    if (target.classList.contains(PROCESSING_CLASS)) return true;
+    if (target.closest(`.${REWRITE_CONTAINER_CLASS}`)) return true;
+    if (target.closest(`.${PROCESSING_CLASS}`)) return true;
+    if (target.closest(`.${TOOLTIP_CONTAINER_CLASS}`)) return true;
+    return false;
+}
+
+function handleMutationRecords(records: MutationRecord[]) {
+    if (!currentSettings[STORAGE_KEYS.IS_ON]) return;
+    if (internalMutationDepth > 0) return;
+
+    let shouldFullScan = false;
+
+    for (const rec of records) {
+        if (rec.type === 'childList') {
+            if (rec.addedNodes.length === 0) continue;
+            for (const node of Array.from(rec.addedNodes)) {
+                if (!isHTMLElement(node)) continue;
+                if (isMutationFromOurInjection(node)) continue;
+
+                recordBlockedDescendants(node);
+                discoverAndObserveParagraphs(node);
+                observeIsolatedDescendantsMutations(node);
+            }
+        }
+        else if (rec.type === 'attributes' && isWalkabilityAttribute(rec.attributeName)) {
+            const target = rec.target;
+            if (!isHTMLElement(target)) continue;
+            if (isMutationFromOurInjection(target)) continue;
+            if (didTransitionToWalkable(target)) {
+                discoverAndObserveParagraphs(target);
+            }
+        }
+        else if (rec.type === 'characterData') {
+            const target = rec.target.parentElement;
+            if (!target || isMutationFromOurInjection(target)) continue;
+            // Cheap guard: only schedule a (debounced) re-scan if the change
+            // happens outside an already-rewritten container.
+            shouldFullScan = true;
+        }
+    }
+
+    if (shouldFullScan) debouncedFullScan();
+}
+
+function observeMutations(container: HTMLElement) {
+    const observer = new MutationObserver(handleMutationRecords);
+    observer.observe(container, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['style', 'class', 'hidden', 'aria-hidden'],
+        characterData: true,
+    });
+    mutationObservers.push(observer);
+    observeIsolatedDescendantsMutations(container);
+}
+
+// Recursively attach a MutationObserver to every shadow root we can reach.
+// Top-level observers won't fire for nodes inside an isolated shadow tree.
+function observeIsolatedDescendantsMutations(element: HTMLElement) {
+    if (element.shadowRoot) {
+        for (const child of Array.from(element.shadowRoot.children)) {
+            if (isHTMLElement(child)) observeMutations(child);
+        }
+    }
+    for (const child of Array.from(element.children)) {
+        if (isHTMLElement(child)) observeIsolatedDescendantsMutations(child);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+function startObservingDOMChanges() {
+    stopObservingDOMChanges();
+    if (!document.body) return;
+    observeMutations(document.body);
+    log.debug('MutationObserver attached to document.body and reachable shadow roots');
+}
+
+function stopObservingDOMChanges() {
+    for (const obs of mutationObservers) {
+        try {
+            obs.disconnect();
+        }
+        catch (err) {
+            log.warn('Error disconnecting MutationObserver:', err);
+        }
+    }
+    mutationObservers = [];
+}
+
+// Initial / re-scan entry point. Walks the body, observes paragraphs, and
+// arms the MutationObserver. Safe to call multiple times.
 async function processParagraphs() {
     if (!currentSettings[STORAGE_KEYS.IS_ON]) {
-        log.debug("Plugin is turned off");
+        log.debug('Plugin off, skipping processParagraphs');
         return;
     }
-    
-    // Prevent overlapping processing calls
     if (isProcessing) {
-        log.debug("Already processing, skipping this call");
+        log.debug('Already processing, skipping reentrant call');
         return;
     }
-    
+    if (!document.body) return;
+
     isProcessing = true;
-    log.debug("Processing paragraphs...");
-    
-    // Select all potential text elements
-    const textElements = Array.from(document.querySelectorAll("p, div, span, h1, h2, h3, h4, h5, h6, li, td, th"))
-        .filter(element => {
-            const trimmedTextLength = element.textContent?.trim().length || 0;
-            
-            // Early visibility check to avoid expensive operations on invisible elements
-            if (!isElementVisible(element)) {
-                return false;
-            }
-            
-            // Logging for debugging filter conditions
-            if (!(element instanceof HTMLElement)) {
-                return false;
-            }
-            if (element.classList.contains('genshred-processed')) {
-                return false;
-            }
-            if (element.classList.contains('genshred-processing')) {
-                return false;
-            }
-            if (element.closest('.genshred-rewrite-container')) {
-                return false;
-            }
-            if (element.closest('.genshred-tooltip-container')) {
-                return false;
-            }
-            if (observedElements.has(element)) {
-                return false;
-            }
-            // Get minimum paragraph length from settings
-            const minParagraphLength = currentSettings.genShredMinParagraphLength ?? MIN_PARAGRAPH_LENGTH;
-            
-            if (trimmedTextLength < minParagraphLength) {
-                // Check if it's Chinese text and use Chinese-specific minimum
-                const chineseText = element.textContent || '';
-                
-                if (isChineseText(chineseText) && trimmedTextLength >= MIN_CHINESE_PARAGRAPH_LENGTH) {
-                    // Chinese text with sufficient length, allow it
-                    const chineseRatio = getChineseTextRatio(chineseText);
-                    log.debug(`Allowing Chinese element with ${trimmedTextLength} chars (Chinese ratio: ${chineseRatio.toFixed(2)})`);
-                } else {
-                    log.debug(`Filtering out element due to short text length (${trimmedTextLength} chars, min: ${minParagraphLength}):`, element.nodeName);
-                    if (element instanceof HTMLElement) {
-                        element.classList.add('genshred-processed');
-                    }
-                    return false;
-                }
-            }
-            if (trimmedTextLength > MAX_PARAGRAPH_LENGTH) {
-                log.debug(`Filtering out element due to long text length (${trimmedTextLength} chars):`, element.nodeName);
-                return false;
-            }
+    try {
+        clearMainContentContainerCache();
+        if (!walkId) walkId = newWalkId();
 
-            // Additional filtering for elements that are likely not human-readable content
-            const tagName = element.tagName;
-            if (tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT' || tagName === 'BUTTON') {
-                return false;
-            }
-            if (element.isContentEditable) {
-                return false;
-            }
-            // Elements inside SVG or Canvas are usually graphical or programmatically generated
-            if (element.closest('svg') || element.closest('canvas')) {
-                return false;
-            }
-            // Heuristic: check if the text contains very few alphabetic characters, indicating it might be code or symbols
-            const alphabeticCharCount = (element.textContent?.match(/[a-zA-Z]/g) || []).length;
-            const chineseCharCount = (element.textContent?.match(/[\u4e00-\u9fff]/g) || []).length;
-            const totalCharCount = element.textContent?.length || 0;
-            
-            // Improved language detection for Chinese and other non-Latin scripts
-            const hasChineseChars = chineseCharCount > 0;
-            const hasLatinChars = alphabeticCharCount > 0;
-            
-            // Chinese-specific filtering logic
-            if (hasChineseChars) {
-                // Use Chinese text processing utilities
-                const chineseText = element.textContent || '';
-                const chineseRatio = getChineseTextRatio(chineseText);
-                
-                // Rule 1: Must be meaningful Chinese text
-                if (!isMeaningfulChineseText(chineseText)) {
-                    log.debug(`Filtering out Chinese element: not meaningful Chinese text`);
-                    return false;
-                }
-                
-                // Rule 2: Check for skip patterns
-                if (shouldSkipChineseElement(chineseText)) {
-                    log.debug(`Filtering out Chinese element: matches skip pattern`);
-                    return false;
-                }
-                
-                // Rule 3: Minimum Chinese characters
-                if (chineseCharCount < 5) {
-                    log.debug(`Filtering out Chinese element: too few Chinese characters (${chineseCharCount})`);
-                    return false;
-                }
-                
-                log.debug(`Chinese element passed all filters: ${chineseCharCount} chars, ratio: ${chineseRatio.toFixed(2)}`);
-            } else if (hasLatinChars) {
-                // Original English logic for Latin text
-                if (totalCharCount > 0 && totalCharCount < 50) {
-                    if (alphabeticCharCount / totalCharCount < 0.3) {
-                        log.debug(`Filtering out Latin element: insufficient alphabetic characters`);
-                        return false;
-                    }
-                }
-            } else {
-                // No recognizable characters, likely code or symbols
-                log.debug(`Filtering out element: no recognizable characters`);
-                return false;
-            }
-            // In observers.ts, inside your element discovery loop:
-            // Check if the potential element to process is inside a container that is already handled
-            if (element.closest('.genshred-processed') || element.closest('.genshred-processing')) {
-                log.debug("Skipping element because it is inside an already processed or in-progress container.");
-                return false;
-            }
+        recordBlockedDescendants(document.body);
 
-            return true;
-        });
+        const start = performance.now();
+        discoverAndObserveParagraphs(document.body);
+        const elapsed = Math.round(performance.now() - start);
+        log.debug(`Walk-and-label discovery completed in ${elapsed}ms`);
 
-    log.debug(`Found ${textElements.length} new elements to process after initial filtering.`);
-
-    // Limit the number of elements processed at once to prevent performance issues
-    const maxElementsPerBatch = 10; // reading mode deprecated
-    const elementsToProcess = textElements.slice(0, maxElementsPerBatch);
-    
-    if (textElements.length > maxElementsPerBatch) {
-        log.debug(`Processing ${elementsToProcess.length} elements out of ${textElements.length} total (performance optimization)`);
-    }
-
-    // Set up intersection observer if not already set up
-    if (!intersectionObserver) {
-        setupIntersectionObserver();
-    }
-
-    // Process elements and observe them with a small delay to prevent blocking
-    for (let i = 0; i < elementsToProcess.length; i++) {
-        const element = elementsToProcess[i];
-        if (element instanceof HTMLElement) {
-            observedElements.add(element);
-            intersectionObserver?.observe(element);
-            
-            // If element is already in viewport, process it immediately
-            if (isElementInViewport(element)) {
-                // Add a small delay between processing elements to prevent blocking
-                if (i > 0) {
-                    await new Promise(resolve => setTimeout(resolve, 10));
-                }
-                
-                try {
-                    await handleFoundElement(element);
-                } catch (error) {
-                    log.error("Error processing element:", error);
-                    element.classList.remove('genshred-processing');
-                }
-            }
+        if (mutationObservers.length === 0) {
+            startObservingDOMChanges();
         }
+
+        // Listen to scroll for very long pages. The IntersectionObserver
+        // already does the heavy lifting, but this helps when virtual lists
+        // change scroll containers without reporting structural mutations.
+        ensureScrollListener();
     }
-    
-    isProcessing = false;
+    finally {
+        isProcessing = false;
+    }
 }
 
+let scrollListenerAttached = false;
+const onScroll = debounce(() => {
+    if (!currentSettings[STORAGE_KEYS.IS_ON]) return;
+    void processParagraphs();
+}, 200);
 
-export { startObservingDOMChanges, stopObservingDOMChanges, setupIntersectionObserver, processParagraphs };
+function ensureScrollListener() {
+    if (scrollListenerAttached) return;
+    window.addEventListener('scroll', onScroll, { passive: true });
+    scrollListenerAttached = true;
+}
+
+function setupIntersectionObserverPublic() {
+    setupIntersectionObserver();
+}
+
+export {
+    startObservingDOMChanges,
+    stopObservingDOMChanges,
+    setupIntersectionObserverPublic as setupIntersectionObserver,
+    processParagraphs,
+};

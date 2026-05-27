@@ -6,7 +6,13 @@ import { currentSettings } from './state-management';
 import { MIN_PARAGRAPH_LENGTH,MAX_PARAGRAPH_LENGTH, MIN_CHINESE_PARAGRAPH_LENGTH } from '../constants';
 import { sha256,calculateComplexityScore, selectSentences, withTimeout, isChineseText, getChineseTextRatio, detectPageLanguage, getLanguageSpecificModel } from './utilities';
 import { createLoadingSpan,createRewriteSpan,applySingleRewriteToElement } from './ui-components';
-import { isElementVisible, getTextNodesWithOffsets,applyRewritesToElement } from './dom-utilities';
+import { isElementVisible, isStructurallyVisible, getTextNodesWithOffsets,applyRewritesToElement } from './dom-utilities';
+import {
+    PROCESSED_CLASS,
+    PROCESSING_CLASS,
+    REWRITE_CONTAINER_CLASS,
+    TOOLTIP_CONTAINER_CLASS,
+} from './dom-rules';
 import {franc} from "franc-min";
 import * as log from "./logger";
 
@@ -30,51 +36,49 @@ export function detectLanguage(text){
 };
 
 async function processElement(element: HTMLElement) {
-    if (element.classList.contains('genshred-processed') || element.classList.contains('genshred-processing')){
+    if (element.classList.contains(PROCESSED_CLASS) || element.classList.contains(PROCESSING_CLASS)){
         log.debug("Skipping element: Already processed or in-progress.");
         return;
     }
-    element.classList.add('genshred-processing');
+    element.classList.add(PROCESSING_CLASS);
     log.debug("process element", element.nodeName, element.textContent?.substring(0, 50));
     try {
         if (!currentSettings[STORAGE_KEYS.IS_ON]) {
             log.debug("Skipping element: Plugin is OFF.");
             return;
         }
-        // if (element.classList.contains('genshred-processed')) {
-        //     log.debug("Skipping element: Already processed.");
-        //     return;
-        // }
-        // if (element.classList.contains('genshred-processing')) {
-        //     log.debug("Skipping element: Already processing.");
-        //     return;
-        // }
-        if (element.closest('.genshred-rewrite-container')) {
+        if (element.closest(`.${REWRITE_CONTAINER_CLASS}`)) {
             log.debug("Skipping element: Part of a rewritten block.");
             return;
         }
-        if (element.closest('.genshred-tooltip-container')) {
+        if (element.closest(`.${TOOLTIP_CONTAINER_CLASS}`)) {
             log.debug("Skipping element: Part of the tooltip.");
             return;
         }
 
-        // Double-check visibility before processing
-        if (!isElementVisible(element)) {
+        // Double-check visibility before processing.
+        // Use structural visibility so paragraphs that have scrolled out of
+        // view (between IntersectionObserver firing and queue draining) still
+        // get processed -- the user will see them when scrolling back.
+        if (!isStructurallyVisible(element)) {
             log.debug("Skipping element: Not visible.");
-            element.classList.add('genshred-processed'); // Mark as processed to avoid re-checking
+            element.classList.add(PROCESSED_CLASS); // Mark as processed to avoid re-checking
             return;
         }
 
-        // Skip complex elements that are likely to cause issues
-        if (element.tagName === 'TABLE' || 
-            element.tagName === 'UL' || 
-            element.tagName === 'OL' || 
-            element.tagName === 'DL' ||
-            element.closest('table') ||
-            element.closest('ul') ||
-            element.closest('ol') ||
-            element.closest('dl')) {
-            log.debug("Skipping complex element (table/list):", element.tagName);
+        // Skip the wrapper tags themselves -- LI/TD/DD inside them are
+        // legitimate paragraph units and are handled separately by the
+        // walk-and-label discovery in observers.ts.
+        if (element.tagName === 'TABLE'
+            || element.tagName === 'UL'
+            || element.tagName === 'OL'
+            || element.tagName === 'DL') {
+            log.debug('Skipping list/table wrapper:', element.tagName);
+            return;
+        }
+        // Tables are still hard for LLMs to handle gracefully; skip TD/TH for now.
+        if (element.tagName === 'TD' || element.tagName === 'TH') {
+            log.debug('Skipping table cell:', element.tagName);
             return;
         }
 
@@ -146,7 +150,7 @@ async function processElement(element: HTMLElement) {
         const ignoreLangs: string[] = userLangPrefs['genshred_ignore_languages'] || [];
         if (ignoreLangs.includes(detectedlanguage)) {
             log.debug(`Skipping element: Language ${detectedlanguage} is in user ignore list.`);
-            element.classList.add('genshred-processed');
+            element.classList.add(PROCESSED_CLASS);
             return;
         }
 
@@ -170,8 +174,8 @@ async function processElement(element: HTMLElement) {
             log.debug("Using cached response from chrome.storage.local for element:", textBlock.substring(0, 50) + "...");
             const { processedSentences, allOriginalSentences } = cachedData[cacheKey];
             applyRewritesToElement(element, processedSentences, allOriginalSentences, textNodeMappings);
-            element.classList.add('genshred-processed');
-            element.classList.remove('genshred-processing');
+            element.classList.add(PROCESSED_CLASS);
+            element.classList.remove(PROCESSING_CLASS);
             return;
         }
 
@@ -329,9 +333,9 @@ async function processElement(element: HTMLElement) {
         } finally {
             // This block will ALWAYS run after the try or catch block finishes.
             // It ensures the element's state is reset, regardless of individual sentence failures.
-            element.classList.remove('genshred-processing');
+            element.classList.remove(PROCESSING_CLASS);
             log.debug("process complete, add processed to:",element)
-            element.classList.add('genshred-processed');
+            element.classList.add(PROCESSED_CLASS);
         }
     }
 

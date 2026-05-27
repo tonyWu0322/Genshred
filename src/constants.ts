@@ -4,10 +4,9 @@ const STORAGE_KEYS = {
     DIFFICULTY_LEVEL: 'genShredDifficultyLevel',
     DIFFICULTY_MAPPING:'genShredDifficultyMapping', // NEW
     CUSTOM_PROMPT: 'genShredCustomPromptTemplate', // Assuming you'll add this later
-    DARK_MODE: 'genShredDarkMode', // Added for dark mode toggle
+    DARK_MODE: 'genShredDarkMode', // 'light' | 'dark' | 'auto'
     READING_MODE: 'genShredReadingMode', // Added for reading mode
     MANUAL_SELECT: 'genShredManualSelect', // Added for manual select mode
-    HIDE_AI_CHAT: 'genShredHideAIChat', // Added for hiding AI chat feature
     MIN_PARAGRAPH_LENGTH: 'genShredMinParagraphLength', // Added for minimum paragraph length setting
     BACKEND_MODE: 'genShredBackendMode',
     CUSTOM_SPLIT_URL: 'genShredCustomSplitUrl',
@@ -20,14 +19,19 @@ const STORAGE_KEYS = {
     CUSTOM_LLM_TIMEOUT_MS: 'genShredCustomLlmTimeoutMs'
 };
 
+// Theme options for the rewrite block appearance.
+// 'auto' inspects the page's effective background color and falls back to the
+// system color-scheme preference, so the rewrite styling stays readable on
+// both light and dark sites without the user toggling it manually.
+type DarkModeSetting = 'light' | 'dark' | 'auto';
+
 const DEFAULT_SETTINGS = {
     [STORAGE_KEYS.IS_ON]: true,
     [STORAGE_KEYS.SENTENCE_COUNT]: 50, // Default to 50% of sentences
     [STORAGE_KEYS.DIFFICULTY_LEVEL]: 'Normal',
-    [STORAGE_KEYS.DARK_MODE]: false, // Default to light mode
+    [STORAGE_KEYS.DARK_MODE]: 'auto' as DarkModeSetting,
     [STORAGE_KEYS.READING_MODE]: false, // Default to normal mode
     [STORAGE_KEYS.MANUAL_SELECT]: true, // Default to enabled manual select mode
-    [STORAGE_KEYS.HIDE_AI_CHAT]: false, // Default to show AI chat feature
     [STORAGE_KEYS.MIN_PARAGRAPH_LENGTH]: 20, // Default minimum paragraph length
     [STORAGE_KEYS.BACKEND_MODE]: 'official',
     [STORAGE_KEYS.CUSTOM_SPLIT_URL]: '',
@@ -52,3 +56,4 @@ const MIN_PARAGRAPH_LENGTH = 20; // Reduced from 100 to 20 for better Chinese su
 const MIN_CHINESE_PARAGRAPH_LENGTH = 10; // Special minimum for Chinese text (more concise)
 const MAX_PARAGRAPH_LENGTH = 11451419; // Maximum characters to process
 export {STORAGE_KEYS, DEFAULT_SETTINGS, MIN_PARAGRAPH_LENGTH, MIN_CHINESE_PARAGRAPH_LENGTH, MAX_PARAGRAPH_LENGTH, PROCESSING_DELAY };
+export type { DarkModeSetting };

@@ -57,6 +57,7 @@ Genshred Impact 是一款 AI 驱动的浏览器扩展，它会自动识别你正
 | 用户系统 | 可选登录，跨设备同步 Prompt 与偏好 |
 | 懒加载与缓存 | 仅处理视口内段落，配合本地缓存降低成本 |
 | Shadow DOM 隔离 | UI 不污染宿主页面样式，兼容 SPA 与复杂前端 |
+| Walk-and-Label DOM | 借鉴 [read-frog](https://github.com/mengxi-ream/read-frog) 的段落识别策略，支持站点自定义规则、主内容区识别与 Shadow DOM 内的段落发现 |
 
 ## 截图预览
 
@@ -93,7 +94,6 @@ flowchart LR
         Options[Options<br/>options.tsx]
         Content[Content Script<br/>content.ts]
         BG[Background<br/>background.ts]
-        Chat[AI 浮窗<br/>AIChatWindow]
     end
 
     subgraph Backend[Parabasis 后端 / 自定义 LLM]
@@ -112,7 +112,6 @@ flowchart LR
     BG -- HTTP --> Split
     BG -- HTTP --> Process
     Process -- OpenAI 协议 --> OpenAI
-    Chat -- HTTP --> Process
     Popup -- 登录 --> Auth
 ```
 
@@ -122,9 +121,6 @@ flowchart LR
 ```text
 Genshred/
 ├── assets/                  扩展图标
-├── components/              React 组件（AI 浮窗等）
-│   ├── AIChatWindow.tsx
-│   └── AIChatQuickActions.tsx
 ├── src/
 │   ├── popup.tsx            扩展弹窗 UI
 │   ├── options.tsx          完整设置页
@@ -138,8 +134,9 @@ Genshred/
 │   └── lib/
 │       ├── api-helpers.ts          调后端 + Prompt 组装
 │       ├── backend-endpoints.ts    官方 / 自定义后端解析
-│       ├── dom-utilities.ts        DOM 遍历与文本替换
-│       ├── observers.ts            MutationObserver + IntersectionObserver
+│       ├── dom-rules.ts            DOM 标记常量、标签规则与按站点自定义选择器
+│       ├── dom-utilities.ts        Walk-and-Label 段落识别 + 跨上下文节点判断 + 文本替换
+│       ├── observers.ts            MutationObserver + IntersectionObserver（懒加载 / 折叠面板感知）
 │       ├── ui-components.ts        悬浮 tooltip / loading
 │       ├── state-management.ts     设置状态广播
 │       ├── utilities.ts            debounce / 难度评分 / 哈希等
@@ -161,7 +158,7 @@ Genshred/
 | *上线中* | *上线中* |
 
 
-### 方式 B：下载 release
+### 方式 B：下载 [release](https://github.com/tonyWu0322/Genshred/releases)
 
 
 
@@ -170,7 +167,6 @@ Genshred/
 ```bash
 git clone https://github.com/tonyWu0322/genshred.git
 cd genshred
-
 pnpm install            # 或 npm install
 pnpm dev                # 启动 Plasmo 开发服务器
 ```
@@ -183,6 +179,82 @@ pnpm dev                # 启动 Plasmo 开发服务器
 > PLASMO_PUBLIC_SERVER_URL=http://localhost:5000 
 pnpm dev
 > ```
+
+## DOM 解析与站点适配
+
+> 自 v1.x 起，前端段落识别从硬编码 `querySelectorAll('p, div, span, ...')` 升级为 **Walk-and-Label** 流程，灵感来自 [read-frog](https://github.com/mengxi-ream/read-frog) 的多站点适配方案，详细分析见 [`DOM_PARSING_REPORT.md`](./DOM_PARSING_REPORT.md)。
+
+### 核心流程
+
+```mermaid
+flowchart LR
+    Init[content.ts 初始化] --> Walk[walkAndLabelElement<br/>给可改写节点打标]
+    Walk --> Collect[collectParagraphElementsDeep<br/>含 Shadow DOM]
+    Collect --> Filter[isCandidateParagraph<br/>长度 / 语言 / 复杂度过滤]
+    Filter --> IO[IntersectionObserver<br/>rootMargin 600px]
+    IO --> Process[processElement<br/>分句 → LLM 改写]
+    Mutation[MutationObserver<br/>style/class/hidden/aria-hidden + childList] --> Walk
+```
+
+1. **Walk-and-Label**：进入页面后对 `document.body` 做一次深度遍历，按标签 / CSS / 站点规则给节点打 `data-genshred-walked`、`data-genshred-paragraph`、`data-genshred-block-node`、`data-genshred-inline-node` 等属性。
+2. **Shadow DOM 友好**：遍历会递归进入 `element.shadowRoot.children`，并对每个开放的 shadow root 单独绑定 MutationObserver，覆盖 React/Vue Web Components 与组件库（Radix、Headless UI 等）。
+3. **跨上下文节点判断**：使用 `nodeType === Node.ELEMENT_NODE` 而非 `instanceof HTMLElement`，避免 iframe / 不同 realm 下判断失败。
+4. **懒加载触发**：通过 `IntersectionObserver(rootMargin: 600px)` 让段落临近视口时再调用 LLM，节省 token 与延迟。
+5. **动态页面感知**：`MutationObserver` 同时监听 `childList`、`subtree` 与 `style / class / hidden / aria-hidden` 属性变化；折叠面板从隐藏切到显示时会被自动重新发现。
+6. **AI 改写不变**：识别到的段落仍由 `processElement` 走原有的「分句 → 难度选择 → 改写 → tooltip 切换」流水线，悬停查看原文等核心 UX 完全保留。
+
+### 标签与节点规则（节选自 `src/lib/dom-rules.ts`）
+
+| 集合 | 含义 |
+| :--- | :--- |
+| `FORCE_BLOCK_TAGS` | 强制视为块级（H1–H6、UL/OL/LI、ARTICLE、SECTION、HEADER、FOOTER、MAIN、NAV…） |
+| `DONT_WALK_AND_TRANSLATE_TAGS` | 完全跳过的标签（SCRIPT、STYLE、NOSCRIPT、IMG、VIDEO、CANVAS、IFRAME、svg、MathML…） |
+| `DONT_WALK_BUT_TRANSLATE_TAGS` | 不递归但保留为父段落文本（CODE、TIME、KBD…） |
+| `MAIN_CONTENT_IGNORE_TAGS` | 当页面存在 `<article>`/`<main>`/`[role="main"]` 时，跳过页面外的 HEADER/FOOTER/NAV/ASIDE/NOSCRIPT |
+| `VISUALLY_HIDDEN_CLASSES` | 跳过 `sr-only`、`visually-hidden` 等无障碍隐藏文本 |
+
+### 站点自定义规则
+
+部分站点的 DOM 结构会让通用启发式失效，此时可在 `dom-rules.ts` 内添加 hostname → 选择器映射：
+
+```ts
+export const CUSTOM_DONT_WALK_INTO_ELEMENT_SELECTOR_MAP: Record<string, string[]> = {
+  'chatgpt.com':   ['.ProseMirror'],
+  'arxiv.org':     ['.ltx_listing'],
+  'www.youtube.com': ['#masthead-container *', '#guide-inner-content *'],
+  'github.com':    ['header *', '#repository-container-header *', 'table.diff-table'],
+  'discord.com':   ['[id^="message-username"]', 'span[class*="-timestamp"]'],
+  'deepwiki.com':  ['header *', 'nav *', 'aside *'],
+  'twitter.com':   ['nav[aria-label] *', '[data-testid="sidebarColumn"] *'],
+  'x.com':         ['nav[aria-label] *', '[data-testid="sidebarColumn"] *'],
+  // ...在此追加新站点
+}
+
+export const CUSTOM_FORCE_BLOCK_TRANSLATION_SELECTOR_MAP: Record<string, string[]> = {
+  'github.com':       ['task-lists'],
+  'www.reddit.com':   ['shreddit-post-text-body'],
+  // ...
+}
+```
+
+`getHostnameRules()` 会在精确匹配失败时回退到 *registrable domain*（`news.example.com → example.com`），方便覆盖二级域名变体。
+
+### 与 Read Frog 的对照
+
+| 维度 | Genshred | Read Frog |
+| :--- | :--- | :--- |
+| 目标 | 按 CEFR 难度 **AI 改写** 当前语言的句子 | 把整页 **翻译** 成另一种语言 |
+| 段落识别 | Walk-and-Label（移植自 read-frog） | Walk-and-Label |
+| 触发方式 | IntersectionObserver + MutationObserver | IntersectionObserver + MutationObserver |
+| 注入方式 | 句级 `<span class="genshred-rewrite-container">`，悬停切换原文/改写 | 段级 wrapper，原译文并列或仅显示译文 |
+| 站点定制 | `CUSTOM_*_SELECTOR_MAP` per-hostname | `CUSTOM_*_SELECTOR_MAP` per-hostname |
+| 安全性 | 改写文本通过 `textContent` 注入，不解析 HTML | 双语模式 textContent / 仅译文模式 innerHTML |
+
+### 已知不足与 TODO
+
+- 跨域 iframe 仍受同源策略限制，需要在 manifest 内加入 `all_frames: true` 并在 iframe 中重新走完整流程。
+- 极长页面（10w+ 节点）的首次 walk 可能阻塞主线程；后续考虑切到 `requestIdleCallback` 分片。
+- 仅译文模式（与 read-frog 对齐）暂未实装，目前所有改写都是「原句保留 + 悬停查看」。
 
 ## 配置说明
 
@@ -197,9 +269,8 @@ pnpm dev
 | `genShredSentenceCount` | `50` | 改写句子占比（%） |
 | `genShredDifficultyLevel` | `Normal` | 当前难度 |
 | `genShredDifficultyMapping` | A2/B2/C1 三档 | 难度 → Prompt 映射 |
-| `genShredDarkMode` | `false` | 暗色 UI |
+| `genShredDarkMode` | `auto` | 改写块主题：`light` / `dark` / `auto`（按页面背景色判定） |
 | `genShredManualSelect` | `true` | 仅改写框选段落 |
-| `genShredHideAIChat` | `false` | 隐藏右下浮窗 |
 | `genShredMinParagraphLength` | `20` | 段落最短字符数 |
 | `genShredBackendMode` | `official` | `official` / `custom` |
 | `genShredCustomLlmUrl` | `""` | 自定义 LLM 端点 |
@@ -246,8 +317,10 @@ pnpm package      # 打包成 build/chrome-mv3-prod.zip
 - [x] 多语言检测（franc-min）
 - [x] 端口/域名运行时切换
 - [ ] 完整用户注册页 UI
-- [ ] DOM 优化（兼容 Immersive Translation / deepwiki 等场景）
-- [ ] 长网页懒加载策略优化
+- [x] DOM 优化（兼容 Immersive Translation / deepwiki 等场景）— 见「DOM 解析与站点适配」
+- [ ] 优化体验（darkmode auto, 特定网页禁用扩展）
+- [ ] 长网页懒加载策略优化（首次 walk 切到 `requestIdleCallback` 分片）
+- [ ] 跨域 iframe（`all_frames: true` + iframe 内独立流水线）
 
 ### 后端（Parabasis）
 - [x] 迁移至 PostgreSQL
@@ -292,6 +365,7 @@ pnpm package      # 打包成 build/chrome-mv3-prod.zip
 
 - [Plasmo Framework](https://www.plasmo.com/) — 极佳的浏览器扩展开发体验
 - [franc](https://github.com/wooorm/franc) — 轻量级语言检测
+- [read-frog](https://github.com/mengxi-ream/read-frog) — Walk-and-Label 段落识别策略与多站点适配规则的参考实现（MIT License）
 - 所有为分级阅读 / CEFR 标准做出贡献的语言学研究者
 
 ## Star History

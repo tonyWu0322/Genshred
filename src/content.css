@@ -1,114 +1,130 @@
-/* popup.css or content.css */
+/* content.css — styling for in-page rewrite spans and the global tooltip.
+ *
+ * Design goals (revised):
+ *   • Blend with the host page instead of overriding its typography.
+ *     `color: inherit` keeps the page's text colour, so the rewrite reads
+ *     naturally on light, dark, and exotic palette sites.
+ *   • Use semi-transparent backgrounds keyed on `currentColor` so the
+ *     highlight tint always relates to the surrounding text colour — this
+ *     means the rewrite block looks "tinted" rather than "patched in" on
+ *     both white-on-black and black-on-white pages.
+ *   • The dark-mode variant is now applied when the *effective* theme is
+ *     dark (either the user picked Dark, or Auto detected a dark page).
+ */
 
-/* Style for the rewritten sentences */
+/* Base rewrite span. The defaults work for light pages. */
 .genshred-rewritten {
-    background-color: #e6f3ff; /* Lighter blue background */
+    background-color: rgba(33, 150, 243, 0.12);
+    color: inherit;
     padding: 2px 4px;
     border-radius: 3px;
+    border-bottom: 1px dashed rgba(33, 150, 243, 0.55);
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
     position: relative;
     cursor: help;
-    transition: background-color 0.2s ease;
-    /* Default z-index */
+    transition: background-color 0.18s ease, border-color 0.18s ease;
     z-index: 1;
 }
 
-/* Hover effect for rewritten text */
+/* Hover lifts the tint slightly so the user has clear feedback. */
 .genshred-rewritten:hover {
-    background-color: #cce7ff;
-    /* Ensure this element has higher z-index when hovered */
+    background-color: rgba(33, 150, 243, 0.22);
+    border-bottom-color: rgba(33, 150, 243, 0.9);
     z-index: 1002;
 }
 
-/* Dark mode styles for rewritten sentences */
+/* Dark-mode variant: lighter, cooler highlight that survives on dark
+ * backgrounds. Border uses `currentColor` (the inherited page text colour) so
+ * the underline tracks whatever foreground the site uses.
+ */
 .genshred-rewritten.genshred-dark-mode {
-    background-color: #2d3748; /* Dark gray background */
-    color: #e2e8f0; /* Light gray text */
-    border: 1px solid #4a5568; /* Dark border */
+    background-color: rgba(100, 181, 246, 0.18);
+    color: inherit;
+    border-bottom: 1px dashed currentColor;
+    border-radius: 3px;
 }
 
-
-/* Dark mode hover effect */
 .genshred-rewritten.genshred-dark-mode:hover {
-    background-color: #4a5568;
-    color: #f7fafc;
+    background-color: rgba(100, 181, 246, 0.32);
+    border-bottom-color: rgba(255, 255, 255, 0.85);
 }
 
-/* Create a single global tooltip container that all elements will use */
+/* Global floating tooltip used to surface the original sentence on hover.
+ * Positioned by JS — we just style it here.
+ */
 .genshred-tooltip-container {
     display: none;
     position: fixed;
-    bottom: 50px;
-    left: 50%;
-    transform: translateX(-50%);
-    background-color: #333;
-    color: white;
+    top: 0;
+    left: 0;
+    background-color: rgba(33, 33, 33, 0.95);
+    color: #ffffff;
     padding: 8px 12px;
-    border-radius: 4px;
-    font-size: 14px;
-    z-index: 10000; /* Ensure it's always on top */
-    max-width: 150%;
+    border-radius: 6px;
+    font-size: 13px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    line-height: 1.45;
+    z-index: 2147483646;
+    max-width: 360px;
     white-space: normal;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-    pointer-events: none;
-    opacity: 0.95;
-    transition: opacity 0.2s ease;
-    text-align: left;
-    line-height: 1.4;
     word-break: break-word;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+    pointer-events: none;
+    opacity: 0.97;
+    text-align: left;
 }
 
-/* Hide the default tooltip behavior */
+/* Defensively suppress any inherited ::after / ::before pseudo content that
+ * other extensions or page styles might use as accidental tooltips.
+ */
 .genshred-rewritten::after,
 .genshred-rewritten::before {
     display: none !important;
 }
 
-/* Hide original text until toggled */
+/* Hide original text until toggled. */
 .genshred-original-hidden {
     display: none;
 }
 
-/* Basic spinner */
+/* Loading spinner used during single-sentence rewrites. */
 .genshred-loading-spinner {
-    border: 3px solid #f3f3f3; /* Light grey */
-    border-top: 3px solid #3498db; /* Blue */
+    border: 3px solid rgba(0, 0, 0, 0.08);
+    border-top: 3px solid #3498db;
     border-radius: 50%;
     width: 16px;
     height: 16px;
-    animation: spin 1s linear infinite;
-    display: inline-block; /* Aligns with text */
-    vertical-align: middle; /* Keeps it aligned vertically */
-    margin-left: 5px; /* Spacing from text */
+    animation: genshred-spin 1s linear infinite;
+    display: inline-block;
+    vertical-align: middle;
+    margin-left: 5px;
 }
 
-@keyframes spin {
+@keyframes genshred-spin {
     0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }
 }
 
-/* Style for the wrapper around original text + spinner */
+/* Wrapper around original text + spinner while we wait for the rewrite. */
 .genshred-original-text-wrapper {
-    position: relative; /* For tooltip positioning if needed */
-    display: inline; /* To not break flow */
+    position: relative;
+    display: inline;
 }
 
-/* Hide original text while loading, if preferred */
 .genshred-original-text-wrapper.loading .original-text {
-    /* You could hide this or reduce its opacity */
-    opacity: 0.8;
+    opacity: 0.7;
 }
 
-/* Optional: Placeholder for rewritten text while loading */
 .genshred-loading-placeholder {
-    /* color: #888; */
     font-style: italic;
     margin-left: 5px;
 }
 
-/* Styles for the manual rewrite button */
+/* Manual rewrite button. */
 .genshred-rewrite-button {
     position: absolute;
-    background-color: #007bff; /* A nice blue */
+    background-color: #1976d2;
     color: white;
     border: none;
     border-radius: 4px;
@@ -116,37 +132,36 @@
     font-size: 14px;
     cursor: pointer;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-    z-index: 10001; /* Higher than tooltip */
-    display: none; /* Hidden by default, shown by JS */
+    z-index: 2147483647;
+    display: none;
     transition: background-color 0.2s ease;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     white-space: nowrap;
 }
 
 .genshred-rewrite-button:hover {
-    background-color: #0056b3;
+    background-color: #115293;
 }
 
-/* 确保改写容器正确显示 */
+/* Container span keeps inline flow so the rewrite slots into prose cleanly. */
 .genshred-rewrite-container {
     display: inline;
     position: relative;
 }
-/* === 显示控制：统一管理 visibility === */
 
-/* 默认隐藏：所有带 genshred-visible 的才显示 */
-
+/* === Visibility control ================================================ */
+/* Only spans with `.genshred-visible` are rendered. Centralising this here
+ * keeps the toggle behavior in ui-components.ts trivial.
+ */
 .genshred-original-hidden {
     display: none !important;
 }
 
-/* 显示状态：只有加了 genshred-visible 的才显示 */
 .genshred-rewritten.genshred-visible,
 .genshred-original-hidden.genshred-visible {
     display: inline !important;
 }
 
-/* 隐藏状态：明确隐藏（可选，用于 clarity） */
 .genshred-rewritten:not(.genshred-visible),
 .genshred-original-hidden:not(.genshred-visible) {
     display: none !important;

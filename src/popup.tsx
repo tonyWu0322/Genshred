@@ -3,9 +3,19 @@ import './popup.css';
 import PromptSettingsModal from './PromptSettingsModal';
 import UserModal from './UserModal';
 import { STORAGE_KEYS, DEFAULT_SETTINGS } from '~src/constants';
+import type { DarkModeSetting } from '~src/constants';
 export {STORAGE_KEYS}; // ???
 // Define the difficulty mapping type
 type DifficultyMappings = Record<string, string>;
+
+// Older builds stored darkMode as a boolean. Coerce legacy values into the new
+// 'light' | 'dark' | 'auto' shape so the UI stays consistent across upgrades.
+function normalizeDarkMode(value: unknown): DarkModeSetting {
+  if (value === true) return 'dark';
+  if (value === false) return 'light';
+  if (value === 'light' || value === 'dark' || value === 'auto') return value;
+  return 'auto';
+}
 
 function Popup() {
   // === State Variables ===
@@ -14,9 +24,10 @@ function Popup() {
   const [sentencesToRewrite, setSentencesToRewrite] = useState<number>(DEFAULT_SETTINGS[STORAGE_KEYS.SENTENCE_COUNT] as number);
   const [difficulty, setDifficulty] = useState<string>(DEFAULT_SETTINGS[STORAGE_KEYS.DIFFICULTY_LEVEL] as string);
   const [manualSelect, setManualSelect] = useState<boolean>(DEFAULT_SETTINGS[STORAGE_KEYS.MANUAL_SELECT] as boolean);
-  const [darkMode, setDarkMode] = useState<boolean>(DEFAULT_SETTINGS[STORAGE_KEYS.DARK_MODE] as boolean);
+  const [darkMode, setDarkMode] = useState<DarkModeSetting>(
+    normalizeDarkMode(DEFAULT_SETTINGS[STORAGE_KEYS.DARK_MODE])
+  );
   const [readingMode, setReadingMode] = useState<boolean>(DEFAULT_SETTINGS[STORAGE_KEYS.READING_MODE] as boolean);
-  const [hideAIChat, setHideAIChat] = useState<boolean>(DEFAULT_SETTINGS[STORAGE_KEYS.HIDE_AI_CHAT] as boolean);
   
   // Modal states
   const [isPromptModalOpen, setIsPromptModalOpen] = useState(false);
@@ -43,9 +54,8 @@ function Popup() {
       setSentencesToRewrite(storedSettings[STORAGE_KEYS.SENTENCE_COUNT] ?? DEFAULT_SETTINGS[STORAGE_KEYS.SENTENCE_COUNT]);
       setDifficulty(String(storedSettings[STORAGE_KEYS.DIFFICULTY_LEVEL] ?? DEFAULT_SETTINGS[STORAGE_KEYS.DIFFICULTY_LEVEL]));
       setManualSelect(storedSettings[STORAGE_KEYS.MANUAL_SELECT] ?? DEFAULT_SETTINGS[STORAGE_KEYS.MANUAL_SELECT]);
-      setDarkMode(storedSettings[STORAGE_KEYS.DARK_MODE] ?? DEFAULT_SETTINGS[STORAGE_KEYS.DARK_MODE]);
+      setDarkMode(normalizeDarkMode(storedSettings[STORAGE_KEYS.DARK_MODE] ?? DEFAULT_SETTINGS[STORAGE_KEYS.DARK_MODE]));
       setReadingMode(storedSettings[STORAGE_KEYS.READING_MODE] ?? DEFAULT_SETTINGS[STORAGE_KEYS.READING_MODE]);
-      setHideAIChat(storedSettings[STORAGE_KEYS.HIDE_AI_CHAT] ?? DEFAULT_SETTINGS[STORAGE_KEYS.HIDE_AI_CHAT]);
       setDifficultyMappings(storedSettings[STORAGE_KEYS.DIFFICULTY_MAPPING] ?? DEFAULT_SETTINGS[STORAGE_KEYS.DIFFICULTY_MAPPING]);
       setCustomPrompts(storedSettings['genShredCustomPrompts'] ?? []);
     };
@@ -59,9 +69,8 @@ function Popup() {
         if (changes[STORAGE_KEYS.SENTENCE_COUNT]) setSentencesToRewrite(changes[STORAGE_KEYS.SENTENCE_COUNT].newValue);
         if (changes[STORAGE_KEYS.DIFFICULTY_LEVEL]) setDifficulty(changes[STORAGE_KEYS.DIFFICULTY_LEVEL].newValue);
         if (changes[STORAGE_KEYS.MANUAL_SELECT]) setManualSelect(changes[STORAGE_KEYS.MANUAL_SELECT].newValue);
-        if (changes[STORAGE_KEYS.DARK_MODE]) setDarkMode(changes[STORAGE_KEYS.DARK_MODE].newValue);
+        if (changes[STORAGE_KEYS.DARK_MODE]) setDarkMode(normalizeDarkMode(changes[STORAGE_KEYS.DARK_MODE].newValue));
         if (changes[STORAGE_KEYS.READING_MODE]) setReadingMode(changes[STORAGE_KEYS.READING_MODE].newValue);
-        if (changes[STORAGE_KEYS.HIDE_AI_CHAT]) setHideAIChat(changes[STORAGE_KEYS.HIDE_AI_CHAT].newValue);
         if (changes['genShredDifficultyMapping']) setDifficultyMappings(changes['genShredDifficultyMapping'].newValue);
         if (changes['genShredCustomPrompts']) setCustomPrompts(changes['genShredCustomPrompts'].newValue);
       }
@@ -128,11 +137,10 @@ function Popup() {
     await chrome.storage.local.set({ [STORAGE_KEYS.MANUAL_SELECT]: newState });
   };
 
-  // Dark mode toggle, now only sets storage
-  const handleDarkModeToggle = async () => {
-    const newState = !darkMode;
-    // setDarkMode(newState); // State will be updated by the listener
-    await chrome.storage.local.set({ [STORAGE_KEYS.DARK_MODE]: newState });
+  // Dark mode select, persists the chosen variant ('light' | 'dark' | 'auto').
+  const handleDarkModeChange = async (event: React.ChangeEvent<HTMLSelectElement>) => {
+    const value = normalizeDarkMode(event.target.value);
+    await chrome.storage.local.set({ [STORAGE_KEYS.DARK_MODE]: value });
   };
 
   // Reading mode toggle, now only sets storage
@@ -140,13 +148,6 @@ function Popup() {
     const newState = !readingMode;
     // setReadingMode(newState); // State will be updated by the listener
     await chrome.storage.local.set({ [STORAGE_KEYS.READING_MODE]: newState });
-  };
-
-  // Hide AI chat toggle, now only sets storage
-  const handleHideAIChatToggle = async () => {
-    const newState = !hideAIChat;
-    // setHideAIChat(newState); // State will be updated by the listener
-    await chrome.storage.local.set({ [STORAGE_KEYS.HIDE_AI_CHAT]: newState });
   };
 
   // Add this handler after your other handler functions
@@ -255,29 +256,16 @@ function Popup() {
         </div>
 
         <div className="control-group">
-          <label htmlFor="dark-mode-toggle">Dark Mode</label>
-          <label className="switch">
-            <input
-              type="checkbox"
-              id="dark-mode-toggle"
-              checked={!!darkMode}
-              onChange={handleDarkModeToggle}
-            />
-            <span className="slider round"></span>
-          </label>
-        </div>
-
-        <div className="control-group">
-          <label htmlFor="hide-ai-chat-toggle">AI Chat</label>
-          <label className="switch">
-            <input
-              type="checkbox"
-              id="hide-ai-chat-toggle"
-              checked={!hideAIChat}
-              onChange={handleHideAIChatToggle}
-            />
-            <span className="slider round"></span>
-          </label>
+          <label htmlFor="dark-mode-select">Rewrite Theme</label>
+          <select
+            id="dark-mode-select"
+            value={darkMode}
+            onChange={handleDarkModeChange}
+          >
+            <option value="auto">Auto (match page)</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
         </div>
 
         <div className="control-group" style={{display:"none"}}>
