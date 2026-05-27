@@ -60,7 +60,7 @@ Genshred Impact 是一款 AI 驱动的浏览器扩展，它会自动识别你正
 
 ## 截图预览
 
-> 在仓库根目录创建 `docs/screenshots/` 目录，放入下列图片即可在 GitHub 中正常渲染。
+<!-- > 在仓库根目录创建 `docs/screenshots/` 目录，放入下列图片即可在 GitHub 中正常渲染。 -->
 
 <div align="center">
 
@@ -154,20 +154,22 @@ Genshred/
 
 ## 快速开始
 
-### 方式 A：从应用商店安装（推荐）
+### 方式 A：从应用商店安装（目前是否上线待定）
 
 | Chrome Web Store | Edge Add-ons |
 | :---: | :---: |
 | *上线中* | *上线中* |
 
-> 上线后请把上方占位换成实际商店链接与下载量 badge：
-> `https://img.shields.io/chrome-web-store/users/<EXT_ID>`
 
-### 方式 B：从源码加载（开发者 / 尝鲜）
+### 方式 B：下载 release
+
+
+
+### 方式 C：从源码加载（开发者）
 
 ```bash
 git clone https://github.com/tonyWu0322/genshred.git
-cd genshred/genshred_web/Genshred
+cd genshred
 
 pnpm install            # 或 npm install
 pnpm dev                # 启动 Plasmo 开发服务器
@@ -176,9 +178,10 @@ pnpm dev                # 启动 Plasmo 开发服务器
 然后在浏览器扩展页面打开「开发者模式」，加载 `build/chrome-mv3-dev/` 目录即可。修改源码会热重载。
 
 > [!NOTE]
-> 默认服务器地址定义在 `src/config.ts` 的 `SERVER_URL`。若想连接本地后端，可在构建时通过环境变量覆盖：
+> 默认服务器地址定义在 `src/config.ts` 的 `SERVER_URL`，目前为项目官网，项目后端计划在未来开源：
 > ```bash
-> PLASMO_PUBLIC_SERVER_URL=http://localhost:5000 pnpm dev
+> PLASMO_PUBLIC_SERVER_URL=http://localhost:5000 
+pnpm dev
 > ```
 
 ## 配置说明
@@ -233,11 +236,6 @@ pnpm package      # 打包成 build/chrome-mv3-prod.zip
 
 更多框架信息请见 [Plasmo 官方文档](https://docs.plasmo.com/)。
 
-### 代码规范
-
-- TypeScript 严格模式
-- Prettier + `@ianvs/prettier-plugin-sort-imports` 自动整理 import
-- 提交前建议跑一次 `pnpm build` 检查类型错误
 
 ## 路线图
 
@@ -262,7 +260,7 @@ pnpm package      # 打包成 build/chrome-mv3-prod.zip
 
 ## 贡献
 
-非常欢迎 PR 与 Issue！请遵循以下流程：
+本人小白，非常欢迎 PR 与 Issue！请遵循以下流程：
 
 1. Fork 本仓库并创建特性分支：`git checkout -b feat/awesome-thing`
 2. 提交更改：`git commit -m "feat: add awesome thing"`（推荐 [Conventional Commits](https://www.conventionalcommits.org/)）
@@ -279,8 +277,8 @@ pnpm package      # 打包成 build/chrome-mv3-prod.zip
 
 <table>
 <tr>
-  <td align="center"><a href="https://github.com/tonyWu0322"><sub><b>yuanyou</b></sub></a></td>
-  <td align="center"><a href="https://github.com/yanyuss-01"><sub><b>yanyuss</b></sub></a></td>
+  <td align="center">创意+后端：<a href="https://github.com/tonyWu0322"><sub><b>yuanyou</b></sub></a></td>
+  <td align="center">原型+前端：<a href="https://github.com/yanyuss-01"><sub><b>yanyuss</b></sub></a></td>
 </tr>
 </table>
 
@@ -294,7 +292,6 @@ pnpm package      # 打包成 build/chrome-mv3-prod.zip
 
 - [Plasmo Framework](https://www.plasmo.com/) — 极佳的浏览器扩展开发体验
 - [franc](https://github.com/wooorm/franc) — 轻量级语言检测
-- [PlasmoHQ/bpp](https://github.com/PlasmoHQ/bpp) — 跨商店自动发布
 - 所有为分级阅读 / CEFR 标准做出贡献的语言学研究者
 
 ## Star History
