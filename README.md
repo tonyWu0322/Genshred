@@ -65,9 +65,15 @@ Genshred Impact 是一款 AI 驱动的浏览器扩展，它会自动识别你正
 
 <div align="center">
 
-| Popup 面板 | 改写效果 | 自定义 Prompt |
-| :---: | :---: | :---: |
-| <img src="./docs/screenshots/popup.png" width="240" /> | <img src="./docs/screenshots/inline-rewrite.png" width="320" /> | <img src="./docs/screenshots/prompt-modal.png" width="240" /> |
+### 自动改写
+
+![[./docs/screenshots/自动改写.gif]]
+
+![[./docs/screenshots/论文阅读.gif]]
+
+### 手动改写
+
+![[./docs/screenshots/手动2.gif]]
 
 </div>
 
@@ -365,7 +371,7 @@ pnpm package      # 打包成 build/chrome-mv3-prod.zip
 
 - [Plasmo Framework](https://www.plasmo.com/) — 极佳的浏览器扩展开发体验
 - [franc](https://github.com/wooorm/franc) — 轻量级语言检测
-- [read-frog](https://github.com/mengxi-ream/read-frog) — Walk-and-Label 段落识别策略与多站点适配规则的参考实现（MIT License）
+- [read-frog](https://github.com/mengxi-ream/read-frog) — Walk-and-Label 段落识别策略与多站点适配规则的参考实现（GPL-3.0 License）
 - 所有为分级阅读 / CEFR 标准做出贡献的语言学研究者
 
 ## Star History
@@ -382,5 +388,6 @@ pnpm package      # 打包成 build/chrome-mv3-prod.zip
 
 <div align="center">
   <sub>Built with curiosity by language learners, for language learners.</sub><br/>
+  <img alt="slogan" src="./docs/screenshots/slogan.png">
   <sub>如果这个项目帮到了你，欢迎点一颗 ⭐ Star 支持我们！</sub>
 </div>
