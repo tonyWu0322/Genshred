@@ -13,6 +13,8 @@ import { createTooltip, showTooltip, hideTooltip, createLoadingSpan, createRewri
 import { startObservingDOMChanges, stopObservingDOMChanges, setupIntersectionObserver, processParagraphs } from './lib/observers';
 // All from `api-helpers.ts`
 import { processElement, getPromptForDifficultyAndLanguage, detectLanguage} from './lib/api-helpers';
+// All from `rewrite-cache.ts`
+import { getCachedRewrite, setCachedRewrite, clearMemoryCache } from './lib/rewrite-cache';
 // All from `utilities.ts`
 import { debounce, escapeRegExp, escapeHTML, calculateComplexityScore, selectSentences, sha256, handleIframes, clearPageLanguageCache, testLanguageDetection, testLanguageModelSelection } from './lib/utilities';
 // All from `constants.ts`
@@ -150,6 +152,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // NEW: Handle CLEAR_CACHE message (as discussed previously)
     if (message.type === "CLEAR_CACHE") {
         log.debug("Content script received CLEAR_CACHE message. Clearing chrome.storage.local cache.");
+        // The in-memory layer of the rewrite cache must be cleared
+        // synchronously, otherwise the next paragraph processed would still
+        // get served from a stale in-tab Map even after we wipe storage.
+        clearMemoryCache();
         // Clear all items that start with 'genshred_cache_' prefix
         chrome.storage.local.get(null, (items) => {
             const keysToRemove = Object.keys(items).filter(key => key.startsWith('genshred_cache_'));
@@ -253,6 +259,38 @@ async function handleRewriteSelectedText() {
         }
         const effectivePromptInstruction = await getPromptForDifficultyAndLanguage(selectedDifficulty, detectedlanguage);
         const effectiveCustomPromptTemplate = currentSettings[STORAGE_KEYS.CUSTOM_PROMPT];
+        const cacheInputs = {
+            sentence: selectedText,
+            userLevel: selectedDifficulty,
+            language: detectedlanguage,
+            promptInstruction: effectivePromptInstruction,
+            customPromptTemplate: effectiveCustomPromptTemplate,
+        };
+
+        // Cache hit: skip the LLM round-trip and apply the rewrite directly.
+        // Manual rewrites are often re-applied to the same phrase as the
+        // user iterates, so caching pays off here even more than in the
+        // auto path.
+        const cachedManualRewrite = await getCachedRewrite(cacheInputs);
+        if (cachedManualRewrite) {
+            log.debug("Manual rewrite - cache hit, skipping LLM call.");
+            if (loadingSpan.parentNode) {
+                loadingSpan.parentNode.replaceChild(
+                    createRewriteSpan(selectedText, cachedManualRewrite),
+                    loadingSpan,
+                );
+            }
+            const selection = window.getSelection();
+            if (selection && selection.toString().trim().length > 0) {
+                const r = selection.getRangeAt(0);
+                const rect = r.getBoundingClientRect();
+                showRewriteButton(rect.right + window.scrollX + 5, rect.top + window.scrollY);
+            } else {
+                hideRewriteButton();
+            }
+            return;
+        }
+
         log.debug("Manual rewrite context:", {
             preview: selectedText.slice(0, 120),
             effectivePromptInstruction,
@@ -288,6 +326,9 @@ async function handleRewriteSelectedText() {
             if (loadingSpan.parentNode) {
                 loadingSpan.parentNode.replaceChild(createRewriteSpan(selectedText, rewrittenText), loadingSpan);
             }
+            // Persist the result so the same phrase reuses it next time. We
+            // don't await so the UI stays snappy even if storage is slow.
+            void setCachedRewrite(cacheInputs, rewrittenText);
             // After successful rewrite, re-evaluate button visibility based on current selection
             const selection = window.getSelection();
             if (selection && selection.toString().trim().length > 0) {

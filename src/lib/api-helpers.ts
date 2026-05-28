@@ -4,9 +4,10 @@ import { STORAGE_KEYS } from '../constants';
 import type { ProcessResponse } from '../types';
 import { currentSettings } from './state-management';
 import { MIN_PARAGRAPH_LENGTH,MAX_PARAGRAPH_LENGTH, MIN_CHINESE_PARAGRAPH_LENGTH } from '../constants';
-import { sha256,calculateComplexityScore, selectSentences, withTimeout, isChineseText, getChineseTextRatio, detectPageLanguage, getLanguageSpecificModel } from './utilities';
+import { calculateComplexityScore, selectSentences, withTimeout, isChineseText, getChineseTextRatio, detectPageLanguage, getLanguageSpecificModel } from './utilities';
 import { createLoadingSpan,createRewriteSpan,applySingleRewriteToElement } from './ui-components';
-import { isElementVisible, isStructurallyVisible, getTextNodesWithOffsets,applyRewritesToElement } from './dom-utilities';
+import { isElementVisible, isStructurallyVisible, getTextNodesWithOffsets } from './dom-utilities';
+import { getCachedRewrite, setCachedRewrite } from './rewrite-cache';
 import {
     PROCESSED_CLASS,
     PROCESSING_CLASS,
@@ -162,22 +163,10 @@ async function processElement(element: HTMLElement) {
         log.debug("Using difficulty:", selectedDifficulty);
         log.debug("Using prompt instruction:", effectivePromptInstruction);
 
-        // Create a unique hash for the cache key to handle long text blocks
-        const textHash = await sha256(textBlock);
-        const cacheKey = `genshred_cache_${textHash}_${selectedDifficulty}_${effectiveCustomPromptTemplate || 'no_custom_prompt'}_${currentSettings[STORAGE_KEYS.SENTENCE_COUNT]}`;
-
-        const cachedData = await chrome.storage.local.get(cacheKey);
-        log.debug("Checking cache for key:", cacheKey);
-        log.debug("Cached data retrieved:", cachedData);
-
-        if (cachedData[cacheKey]) {
-            log.debug("Using cached response from chrome.storage.local for element:", textBlock.substring(0, 50) + "...");
-            const { processedSentences, allOriginalSentences } = cachedData[cacheKey];
-            applyRewritesToElement(element, processedSentences, allOriginalSentences, textNodeMappings);
-            element.classList.add(PROCESSED_CLASS);
-            element.classList.remove(PROCESSING_CLASS);
-            return;
-        }
+        // NOTE: paragraph-level caching used to live here, but it could never
+        // hit anything because no code path ever wrote results back. The
+        // new per-sentence cache (see rewrite-cache.ts) is consulted inside
+        // the sentence loop below and is the only cache we keep.
 
         // Detect page language and get appropriate sentence splitting model
         const pageLanguage = detectPageLanguage();
@@ -282,7 +271,23 @@ async function processElement(element: HTMLElement) {
         }
 
         log.debug(`Processing ${sentencesToProcess.length} sentences:`, sentencesToProcess);
+        const cacheInputs = {
+            userLevel: selectedDifficulty,
+            language: detectedlanguage,
+            promptInstruction: effectivePromptInstruction,
+            customPromptTemplate: effectiveCustomPromptTemplate,
+        } as const;
         const rewritePromises = sentencesToProcess.map(async({sentence, index, startIndex})=>{
+            // Per-sentence cache check. If we hit, we skip the entire LLM
+            // round-trip and inject the rewrite synchronously so the user
+            // never sees a loading spinner for cached content.
+            const cached = await getCachedRewrite({ ...cacheInputs, sentence });
+            if (cached) {
+                log.debug('Skipping LLM call (cache hit) for', sentence.slice(0, 80));
+                applySingleRewriteToElement(element, sentence, cached, startIndex, textNodeMappings);
+                return;
+            }
+
             const loadingSpan = createLoadingSpan(sentence);
             applySingleRewriteToElement(element, sentence, '', startIndex, textNodeMappings, loadingSpan);
 
@@ -311,10 +316,15 @@ async function processElement(element: HTMLElement) {
                     hasRewrite: !!result?.rewritten_sentences?.[0]?.rewritten_text
                 });
                 if (result?.rewritten_sentences?.[0]) {
-                    const rewriteSpan = createRewriteSpan(sentence, result.rewritten_sentences[0].rewritten_text);
+                    const rewrittenText = result.rewritten_sentences[0].rewritten_text;
+                    const rewriteSpan = createRewriteSpan(sentence, rewrittenText);
                     if (loadingSpan.parentNode) {
                         loadingSpan.parentNode.replaceChild(rewriteSpan, loadingSpan);
                     }
+                    // Persist the rewrite *only* after a successful LLM
+                    // response. We intentionally don't await this so the
+                    // next sentence doesn't have to wait on storage I/O.
+                    void setCachedRewrite({ ...cacheInputs, sentence }, rewrittenText);
                 }
             } catch (error) {
                 log.error("Error rewriting sentence:", error);
